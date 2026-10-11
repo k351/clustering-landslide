@@ -313,7 +313,7 @@ with col2:
         <div class="advisor-icon">🎓</div>
         <div class="advisor-title">Pembimbing Pendamping</div>
         <div class="advisor-name">
-            Nama Pembimbing Pendamping
+            Manatap Dolok Lauro, S.Kom. M.M.S.I.
         </div>
         <div class="advisor-university">
             Universitas Tarumanagara

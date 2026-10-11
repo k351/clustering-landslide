@@ -42,7 +42,7 @@ def show_sidebar(active_page=None):
             key=f"nav_{page_name.lower()}",
             icon=icon,
             use_container_width=True,
-            type="primary" if active_page == page_name else "secondary",
+            type="secondary",
         ):
             st.switch_page(page_path)
 
@@ -53,6 +53,7 @@ def show_sidebar(active_page=None):
         key="sidebar_logout",
         icon=":material/logout:",
         use_container_width=True,
+        type="secondary",
     ):
         logout_user()
         st.switch_page("Home.py")
