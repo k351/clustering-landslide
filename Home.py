@@ -20,39 +20,82 @@ hide_default_nav()
 if not is_logged_in():
     hide_default_nav(hide_sidebar=True)
 
-    st.title("Sistem Clustering Tanah Longsor")
-    st.write("Silakan masuk untuk melihat hasil pengelompokan wilayah.")
-
-    login_option = st.radio(
-        "Pilih cara masuk:",
-        ["Login sebagai Admin", "Masuk sebagai Guest"],
-        horizontal=True,
+    st.markdown(
+        """
+        <style>
+            .login-header {
+                text-align: center;
+                margin-bottom: 1.5rem;
+            }
+            .login-header h2 {
+                font-size: 26px !important;
+                font-weight: 700 !important;
+                color: #ffffff;
+            }
+            .login-header p {
+                color: #94a3b8;
+                font-size: 14px;
+            }
+        </style>
+    """,
+        unsafe_allow_html=True,
     )
 
-    if login_option == "Login sebagai Admin":
-        st.subheader("Login Admin")
-        with st.form("login_form"):
-            username = st.text_input("Username")
-            password = st.text_input("Password", type="password")
-            submit = st.form_submit_button("Login", use_container_width=True)
+    _, col_center, _ = st.columns([1, 1.4, 1])
 
-            if submit:
-                if not username or not password:
-                    st.warning("Harap isi username dan password.")
-                elif check_admin_login(username, password):
-                    login_user(username, "admin")
-                    st.rerun()
-                else:
-                    st.error("Username atau password salah.")
-    else:
-        st.subheader("Masuk sebagai Guest")
-        st.info(
-            "Sebagai guest Anda dapat melihat hasil clustering, "
-            "tetapi tidak dapat mengunggah atau mengubah data."
+    with col_center:
+        st.markdown(
+            """
+            <div class="login-header">
+                <h2>🏔️ Portal Autentikasi</h2>
+                <p>Sistem Clustering & Analisis Tanah Longsor</p>
+            </div>
+        """,
+            unsafe_allow_html=True,
         )
-        if st.button("Masuk sebagai Guest", use_container_width=True):
-            login_user("Guest", "guest")
-            st.rerun()
+
+        tab_admin, tab_guest = st.tabs(
+            ["🔐 Login Administrator", "🌐 Akses Tamu (Guest)"]
+        )
+
+        with tab_admin:
+            st.markdown("<br>", unsafe_allow_html=True)
+            with st.form("admin_secure_login_form"):
+                username = st.text_input(
+                    "Username", placeholder="Masukkan username admin..."
+                )
+                password = st.text_input(
+                    "Password",
+                    type="password",
+                    placeholder="Masukkan password...",
+                )
+
+                st.markdown("<br>", unsafe_allow_html=True)
+                submit = st.form_submit_button(
+                    "Masuk ke Sistem", use_container_width=True, type="primary"
+                )
+
+                if submit:
+                    if not username or not password:
+                        st.warning("Harap isi username dan password.")
+                    elif check_admin_login(username, password):
+                        login_user(username, "admin")
+                        st.rerun()
+                    else:
+                        st.error("Username atau password salah.")
+
+        with tab_guest:
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.info(
+                "Sebagai guest Anda dapat melihat hasil clustering, "
+                "tetapi tidak dapat mengunggah atau mengubah data."
+            )
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button(
+                "Masuk sebagai Guest", use_container_width=True, type="secondary"
+            ):
+                login_user("Guest", "guest")
+                st.rerun()
 
     st.stop()
 
@@ -75,9 +118,13 @@ st.markdown(
 )
 
 if st.session_state.user_type == "guest":
-    st.warning("Mode guest: data hanya dapat dilihat, tidak dapat diunggah atau diubah.")
+    st.warning(
+        "Mode guest: data hanya dapat dilihat, tidak dapat diunggah atau diubah."
+    )
 else:
-    st.success("Mode admin: Anda dapat mengelola data dan menjalankan clustering.")
+    st.success(
+        "Mode admin: Anda dapat mengelola data dan menjalankan clustering."
+    )
 
 st.subheader("Dokumentasi Tanah Longsor")
 st.image(
@@ -92,6 +139,8 @@ with col1:
     if st.button("Buka Clustering", use_container_width=True):
         st.switch_page("pages/Clustering.py")
 with col2:
-    data_label = "Kelola Data" if st.session_state.user_type == "admin" else "Lihat Data"
+    data_label = (
+        "Kelola Data" if st.session_state.user_type == "admin" else "Lihat Data"
+    )
     if st.button(data_label, use_container_width=True):
         st.switch_page("pages/Data.py")
