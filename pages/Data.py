@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import io
-import os
 import re
-import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +10,7 @@ import streamlit as st
 from pandas.api.types import is_numeric_dtype
 
 from components.auth import is_admin, is_logged_in, require_login
+from components.dataset_store import load_active_dataset, save_active_dataset
 from components.sidebar import show_sidebar
 
 
@@ -21,30 +20,7 @@ st.set_page_config(
     layout="wide",
 )
 
-APP_DIR = Path(__file__).resolve().parents[1]
-DATA_DIR = APP_DIR / "data"
-ACTIVE_DATASET_PATH = DATA_DIR / "dataset_aktif.csv"
-INITIAL_DATASET_PATH = DATA_DIR / "Tanah Longsor.xls"
 DATASET_PERIOD = "2014–2025"
-
-
-def get_active_dataset_path() -> Path:
-    if ACTIVE_DATASET_PATH.is_file():
-        return ACTIVE_DATASET_PATH
-    if INITIAL_DATASET_PATH.is_file():
-        return INITIAL_DATASET_PATH
-    raise FileNotFoundError(
-        "Dataset awal tidak ditemukan di folder data aplikasi."
-    )
-
-
-@st.cache_data(show_spinner=False)
-def load_dataset(path: str, modified_at: float) -> pd.DataFrame:
-    del modified_at
-    dataset_path = Path(path)
-    if dataset_path.suffix.lower() == ".csv":
-        return pd.read_csv(dataset_path, encoding="utf-8-sig", low_memory=False)
-    return pd.read_excel(dataset_path, engine="xlrd")
 
 
 def read_uploaded_dataset(file_name: str, content: bytes) -> pd.DataFrame:
@@ -181,30 +157,6 @@ def validate_dataset(
     return candidate, errors, warnings
 
 
-def save_active_dataset(dataset: pd.DataFrame) -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    temporary_path: str | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            newline="",
-            suffix=".tmp",
-            prefix="dataset_",
-            dir=DATA_DIR,
-            delete=False,
-        ) as temporary_file:
-            temporary_path = temporary_file.name
-            dataset.to_csv(temporary_file, index=False)
-            temporary_file.flush()
-            os.fsync(temporary_file.fileno())
-        os.replace(temporary_path, ACTIVE_DATASET_PATH)
-    except Exception:
-        if temporary_path and os.path.exists(temporary_path):
-            os.unlink(temporary_path)
-        raise
-
-
 def find_region_column(dataset: pd.DataFrame) -> str | None:
     candidates = [
         str(column)
@@ -242,19 +194,23 @@ if success_message:
     st.success(success_message)
 
 try:
-    active_path = get_active_dataset_path()
-    active_dataset = load_dataset(
-        str(active_path),
-        active_path.stat().st_mtime,
-    )
+    (
+        active_file_name,
+        active_dataset,
+        dataset_is_in_database,
+        _dataset_version,
+    ) = load_active_dataset()
 except ImportError:
     st.error(
-        "Pustaka pembaca Excel belum tersedia. Pasang dependensi aplikasi "
-        "dari berkas requirement.txt, termasuk xlrd untuk dataset XLS."
+        "Pustaka database atau pembaca Excel belum tersedia. Pastikan "
+        "SQLAlchemy, psycopg2-binary, dan xlrd terpasang."
     )
     st.stop()
 except Exception as exc:
-    st.error("Dataset aktif gagal dibaca. Periksa berkas sumber dan format datanya.")
+    st.error(
+        "Dataset aktif gagal dimuat dari Neon atau file lokal. Periksa "
+        "koneksi database, tabel active_dataset, dan berkas dataset."
+    )
     st.caption(f"Detail: {exc}")
     st.stop()
 
@@ -280,7 +236,12 @@ metric_columns[3].metric(
     help="Rentang periode: 1 Januari 2014 sampai 31 Desember 2025.",
 )
 
-st.caption(f"Sumber dataset aktif: `{active_path.name}`")
+dataset_source = (
+    f"Neon · {active_file_name}"
+    if dataset_is_in_database
+    else f"File lokal · {active_file_name} (akan disimpan ke Neon saat upload)"
+)
+st.caption(f"Sumber dataset aktif: `{dataset_source}`")
 if region_column is None:
     st.info(
         "Jumlah wilayah tidak dapat dihitung karena kolom nama wilayah "
@@ -395,17 +356,17 @@ if uploaded_file is not None:
             width="stretch",
         ):
             try:
-                save_active_dataset(validated_dataset)
+                save_active_dataset(uploaded_file.name, validated_dataset)
             except Exception as exc:
                 st.error(
                     "Dataset gagal disimpan. Dataset aktif sebelumnya "
-                    "tetap digunakan."
+                    "tetap digunakan. Periksa koneksi Neon dan tabel "
+                    "`active_dataset`."
                 )
                 st.caption(f"Detail: {exc}")
             else:
-                load_dataset.clear()
                 st.session_state.dataset_success_message = (
-                    f"Dataset “{uploaded_file.name}” berhasil disimpan dan "
-                    "sekarang menjadi dataset aktif."
+                    f"Dataset “{uploaded_file.name}” berhasil disimpan ke "
+                    "Neon dan sekarang menjadi dataset aktif."
                 )
                 st.rerun()

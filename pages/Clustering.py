@@ -9,6 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from components.auth import is_logged_in, require_login
+from components.dataset_store import load_active_dataset
 from components.sidebar import show_sidebar
 
 
@@ -20,8 +21,6 @@ st.set_page_config(
 
 APP_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = APP_DIR / "data"
-ACTIVE_DATASET_PATH = DATA_DIR / "dataset_aktif.csv"
-INITIAL_DATASET_PATH = DATA_DIR / "Tanah Longsor.xls"
 GEOJSON_PATH = DATA_DIR / "Indonesia_cities.geojson"
 
 FEATURE_LABELS = [
@@ -151,23 +150,6 @@ def _cluster_color(label: str) -> str:
         return "#64748b"
     cluster_number = int(label.rsplit(" ", 1)[-1])
     return CLUSTER_PALETTE[(cluster_number - 1) % len(CLUSTER_PALETTE)]
-
-
-def get_active_dataset_path() -> Path:
-    if ACTIVE_DATASET_PATH.is_file():
-        return ACTIVE_DATASET_PATH
-    if INITIAL_DATASET_PATH.is_file():
-        return INITIAL_DATASET_PATH
-    raise FileNotFoundError("Dataset tanah longsor tidak ditemukan di folder data aplikasi.")
-
-
-@st.cache_data(show_spinner=False)
-def load_dataset(path: str, modified_at: float) -> pd.DataFrame:
-    del modified_at
-    dataset_path = Path(path)
-    if dataset_path.suffix.casefold() == ".csv":
-        return pd.read_csv(dataset_path, encoding="utf-8-sig", low_memory=False)
-    return pd.read_excel(dataset_path, engine="xlrd")
 
 
 def _resolve_impact_columns(columns: pd.Index) -> dict[str, list[str]]:
@@ -529,21 +511,14 @@ st.markdown(
 )
 
 try:
-    active_path = get_active_dataset_path()
-    dataset_modified_at = active_path.stat().st_mtime
-    source_data = load_dataset(str(active_path), dataset_modified_at)
-except FileNotFoundError as exc:
-    st.error(str(exc))
-    st.stop()
-except ImportError as exc:
-    st.error(
-        "Pustaka pembaca dataset belum tersedia. Pasang dependensi dari "
-        "requirement.txt, termasuk xlrd untuk dataset XLS."
-    )
-    st.caption(str(exc))
-    st.stop()
-except (OSError, ValueError) as exc:
-    st.error("Dataset tanah longsor gagal dibaca.")
+    (
+        active_file_name,
+        source_data,
+        dataset_is_in_database,
+        dataset_version,
+    ) = load_active_dataset()
+except Exception as exc:
+    st.error("Dataset tanah longsor gagal dimuat dari Neon atau file lokal.")
     st.caption(str(exc))
     st.stop()
 
@@ -572,7 +547,12 @@ with experiment_tab:
     top_metrics = st.columns(3)
     top_metrics[0].metric("Periode analisis", "2014–2025")
     top_metrics[1].metric("Kejadian pada dataset", f"{len(source_data):,}")
-    top_metrics[2].metric("Sumber data", active_path.name)
+    dataset_source = (
+        f"Neon · {active_file_name}"
+        if dataset_is_in_database
+        else f"File lokal · {active_file_name}"
+    )
+    top_metrics[2].metric("Sumber data", dataset_source)
 
     st.markdown('<div class="section-kicker">Atur analisis</div>', unsafe_allow_html=True)
     with st.container(border=True):
@@ -690,8 +670,7 @@ with experiment_tab:
             st.session_state["clustering_metadata"] = {
                 "method": method,
                 "year": selected_year,
-                "source_path": str(active_path),
-                "source_modified_at": dataset_modified_at,
+                "dataset_version": dataset_version,
                 "cluster_count": cluster_count,
                 "min_samples": min_samples,
                 "xi": xi,
@@ -713,8 +692,7 @@ with experiment_tab:
     elif (
         metadata["method"] != method
         or metadata["year"] != selected_year
-        or metadata["source_path"] != str(active_path)
-        or metadata["source_modified_at"] != dataset_modified_at
+        or metadata.get("dataset_version") != dataset_version
         or metadata["cluster_count"] != cluster_count
         or metadata["min_samples"] != min_samples
         or metadata.get("xi") != xi
