@@ -88,6 +88,46 @@ st.markdown("""
 if not is_logged_in():
     hide_default_nav(hide_sidebar=True)
 
+    st.markdown(
+        """
+        <style>
+            .login-header h2 {
+                font-size: 32px !important;
+            }
+
+            .login-header p {
+                font-size: 16px;
+                line-height: 1.6;
+            }
+
+            [data-testid="stTabs"] button {
+                font-size: 16px;
+            }
+
+            [data-testid="stTextInput"] label {
+                font-size: 16px;
+            }
+
+            [data-testid="stTextInput"] input {
+                font-size: 16px;
+                min-height: 46px;
+            }
+
+            [data-testid="stFormSubmitButton"] button,
+            [data-testid="stButton"] button {
+                font-size: 16px;
+                min-height: 46px;
+            }
+
+            [data-testid="stAlert"] {
+                font-size: 15px;
+                line-height: 1.6;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     _, col_center, _ = st.columns([1, 1.4, 1])
 
     with col_center:
