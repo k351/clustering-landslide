@@ -512,9 +512,9 @@ st.markdown(
 
 try:
     (
-        active_file_name,
+        _active_file_name,
         source_data,
-        dataset_is_in_database,
+        _dataset_is_in_database,
         dataset_version,
     ) = load_active_dataset()
 except Exception as exc:
@@ -544,15 +544,9 @@ if not available_years:
 experiment_tab, data_tab = st.tabs(["Eksperimen", "Informasi Data"])
 
 with experiment_tab:
-    top_metrics = st.columns(3)
+    top_metrics = st.columns(2)
     top_metrics[0].metric("Periode analisis", "2014–2025")
     top_metrics[1].metric("Kejadian pada dataset", f"{len(source_data):,}")
-    dataset_source = (
-        f"Neon · {active_file_name}"
-        if dataset_is_in_database
-        else f"File lokal · {active_file_name}"
-    )
-    top_metrics[2].metric("Sumber data", dataset_source)
 
     st.markdown('<div class="section-kicker">Atur analisis</div>', unsafe_allow_html=True)
     with st.container(border=True):
