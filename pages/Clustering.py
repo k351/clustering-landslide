@@ -635,17 +635,20 @@ with experiment_tab:
 
     if run_analysis:
         try:
-            regional_data, dropped_rows, valid_event_rows = prepare_regional_data(
-                source_data,
-                selected_year,
-            )
-            clustering_result, silhouette, silhouette_note = cluster_regions(
-                regional_data,
-                method,
-                cluster_count,
-                min_samples,
-                xi,
-            )
+            with st.spinner(
+                f"Menyiapkan data dan menjalankan {method}. Proses ini bisa memerlukan waktu..."
+            ):
+                regional_data, dropped_rows, valid_event_rows = prepare_regional_data(
+                    source_data,
+                    selected_year,
+                )
+                clustering_result, silhouette, silhouette_note = cluster_regions(
+                    regional_data,
+                    method,
+                    cluster_count,
+                    min_samples,
+                    xi,
+                )
         except ImportError as exc:
             st.error(
                 "Pustaka clustering belum tersedia. Pasang dependensi aplikasi "
@@ -744,6 +747,174 @@ with experiment_tab:
                 "Fasilitas Umum Rusak": st.column_config.NumberColumn(format="%d"),
             },
         )
+
+        st.subheader("Distribusi wilayah per cluster")
+        st.caption(
+            "Grafik menunjukkan jumlah dan proporsi kabupaten/kota pada "
+            "setiap cluster. Label cluster bukan tingkat kerawanan."
+        )
+        cluster_distribution = (
+            result.groupby("Cluster", as_index=False)
+            .size()
+            .rename(columns={"size": "Jumlah Kabupaten/Kota"})
+        )
+        cluster_order = sorted(
+            cluster_distribution["Cluster"].tolist(),
+            key=lambda label: (
+                -1 if label == "Noise" else int(label.rsplit(" ", 1)[-1])
+            ),
+        )
+        cluster_distribution["Urutan"] = cluster_distribution["Cluster"].map(
+            {label: index for index, label in enumerate(cluster_order)}
+        )
+        total_tenths = 1000
+        exact_tenths = (
+            cluster_distribution["Jumlah Kabupaten/Kota"] / len(result) * total_tenths
+        )
+        rounded_tenths = exact_tenths.astype(int)
+        remaining_tenths = total_tenths - int(rounded_tenths.sum())
+        largest_remainders = (
+            exact_tenths - rounded_tenths
+        ).sort_values(ascending=False, kind="stable")
+        for index in largest_remainders.index[:remaining_tenths]:
+            rounded_tenths.loc[index] += 1
+
+        cluster_distribution["Persentase"] = (
+            cluster_distribution["Jumlah Kabupaten/Kota"] / len(result) * 100
+        )
+        cluster_distribution["Label Persentase"] = (
+            rounded_tenths.map(lambda value: f"{value // 10}.{value % 10}%")
+        )
+        cluster_colors = [
+            "#64748b"
+            if label == "Noise"
+            else CLUSTER_PALETTE[
+                (int(label.rsplit(" ", 1)[-1]) - 1) % len(CLUSTER_PALETTE)
+            ]
+            for label in cluster_order
+        ]
+        distribution_left, distribution_right = st.columns(2, gap="medium")
+        with distribution_left:
+            st.markdown("**Jumlah kabupaten/kota**")
+            st.vega_lite_chart(
+                cluster_distribution,
+                {
+                    "width": "container",
+                    "height": 330,
+                    "mark": {"type": "bar", "cornerRadiusTopLeft": 5, "cornerRadiusTopRight": 5},
+                    "encoding": {
+                        "x": {
+                            "field": "Cluster",
+                            "type": "ordinal",
+                            "sort": cluster_order,
+                            "axis": {"title": "Cluster", "labelAngle": -35},
+                        },
+                        "y": {
+                            "field": "Jumlah Kabupaten/Kota",
+                            "type": "quantitative",
+                            "axis": {"title": "Jumlah wilayah"},
+                        },
+                        "color": {
+                            "field": "Cluster",
+                            "type": "nominal",
+                            "scale": {
+                                "domain": cluster_order,
+                                "range": cluster_colors,
+                            },
+                            "legend": None,
+                        },
+                        "tooltip": [
+                            {"field": "Cluster", "type": "nominal"},
+                            {
+                                "field": "Jumlah Kabupaten/Kota",
+                                "type": "quantitative",
+                            },
+                            {
+                                "field": "Persentase",
+                                "type": "quantitative",
+                                "format": ".2f",
+                            },
+                        ],
+                    },
+                    "config": {
+                        "view": {"stroke": None},
+                        "axis": {"labelAngle": -35},
+                    },
+                },
+                width="stretch",
+                key="cluster_distribution_bar",
+            )
+        with distribution_right:
+            st.markdown("**Proporsi kabupaten/kota**")
+            st.vega_lite_chart(
+                cluster_distribution,
+                {
+                    "width": "container",
+                    "height": 330,
+                    "layer": [
+                        {
+                            "mark": {"type": "arc", "outerRadius": 125},
+                            "encoding": {
+                                "theta": {
+                                    "field": "Jumlah Kabupaten/Kota",
+                                    "type": "quantitative",
+                                    "stack": True,
+                                },
+                                "order": {
+                                    "field": "Urutan",
+                                    "type": "ordinal",
+                                    "sort": "ascending",
+                                },
+                                "color": {
+                                    "field": "Cluster",
+                                    "type": "nominal",
+                                    "scale": {
+                                        "domain": cluster_order,
+                                        "range": cluster_colors,
+                                    },
+                                    "legend": {"title": None, "orient": "bottom"},
+                                },
+                                "tooltip": [
+                                    {"field": "Cluster", "type": "nominal"},
+                                    {
+                                        "field": "Jumlah Kabupaten/Kota",
+                                        "type": "quantitative",
+                                    },
+                                    {
+                                        "field": "Persentase",
+                                        "type": "quantitative",
+                                        "format": ".2f",
+                                    },
+                                ],
+                            },
+                        },
+                        {
+                            "mark": {
+                                "type": "text",
+                                "radius": 78,
+                                "fontSize": 13,
+                                "fontWeight": "bold",
+                                "color": "white",
+                            },
+                            "encoding": {
+                                "theta": {
+                                    "field": "Jumlah Kabupaten/Kota",
+                                    "type": "quantitative",
+                                    "stack": True,
+                                },
+                                "order": {
+                                    "field": "Urutan",
+                                    "type": "ordinal",
+                                    "sort": "ascending",
+                                },
+                                "text": {"field": "Label Persentase"},
+                            },
+                        },
+                    ],
+                },
+                width="stretch",
+                key="cluster_distribution_pie",
+            )
 
         st.subheader("Persebaran dampak per cluster")
         chart_left, chart_right = st.columns(2)

@@ -52,6 +52,14 @@ def create_dataset_template(columns: pd.Index) -> bytes:
     return buffer.getvalue()
 
 
+def is_exported_index_column(dataset: pd.DataFrame, column: object) -> bool:
+    if not re.fullmatch(r"Unnamed:\s*\d+", str(column).strip(), flags=re.I):
+        return False
+
+    values = pd.to_numeric(dataset[column], errors="coerce").to_numpy()
+    return np.array_equal(values, np.arange(len(dataset)))
+
+
 def validate_dataset(
     uploaded: pd.DataFrame,
     current: pd.DataFrame,
@@ -74,11 +82,24 @@ def validate_dataset(
             + "."
         )
 
-    expected_columns = set(current.columns)
+    exported_index_columns = [
+        column
+        for column in candidate.columns
+        if is_exported_index_column(candidate, column)
+    ]
+    if exported_index_columns:
+        candidate = candidate.drop(columns=exported_index_columns)
+
+    expected_columns = [
+        column
+        for column in current.columns
+        if not is_exported_index_column(current, column)
+    ]
+    expected_column_set = set(expected_columns)
     uploaded_columns = set(candidate.columns)
     missing_columns = [
         str(column)
-        for column in current.columns
+        for column in expected_columns
         if column not in uploaded_columns
     ]
     if missing_columns:
@@ -91,7 +112,7 @@ def validate_dataset(
     extra_columns = [
         str(column)
         for column in candidate.columns
-        if column not in expected_columns
+        if column not in expected_column_set
     ]
     if extra_columns:
         warnings.append(
