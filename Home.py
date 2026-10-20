@@ -238,35 +238,43 @@ with col2:
     )
 
 st.divider()
-
 st.markdown("""
   #### 📊 Fitur Utama
 """)
 
-col_feature1, col_feature2 = st.columns(2)
+col_feature_admin, col_feature_guest = st.columns(2, gap="large")
 
-with col_feature1:
-    st.markdown("""
-    **Untuk Administrator:**
-    - ✅ Upload dan import data longosr
-    - ✅ Melakukan proses clustering dengan berbagai parameter
-    - ✅ Normalisasi dan preprocessing data
-    - ✅ Visualisasi hasil clustering 2D dan 3D
-    - ✅ Evaluasi performa clustering
-    - ✅ Export hasil clustering
-    - ✅ Manajemen data dan pengguna
-    """)
+with col_feature_admin:
+    with st.container(border=True):
+        st.badge("KELOLA DATA DAN ANALISIS", color="blue")
+        st.markdown("### Administrator")
+        st.markdown(
+            "- Meninjau dataset aktif dan mencari data pada tabel.\n"
+            "- Mengunggah dataset CSV atau XLSX setelah pratinjau dan validasi.\n"
+            "- Menjalankan K-Medoids atau OPTICS berdasarkan tahun dan parameter pilihan.\n"
+            "- Melihat ringkasan cluster, distribusi wilayah, grafik sebaran, peta, dan tabel hasil.\n"
+            "- Meninjau Silhouette Score dan mengunduh hasil clustering sebagai CSV."
+        )
+        st.caption(
+            "Preprocessing, agregasi per kabupaten/kota, dan normalisasi "
+            "Min-Max dilakukan dalam alur analisis."
+        )
 
-with col_feature2:
-    st.markdown("""
-    **Untuk Guest:**
-    - 👁️ Melihat hasil clustering yang tersedia
-    - 👁️ Mengakses visualisasi data
-    - 👁️ Membaca laporan analisis
-    - 👁️ Download hasil clustering
-    
-    *Note: Guest tidak dapat mengubah atau menambah data*
-    """)
+with col_feature_guest:
+    with st.container(border=True):
+        st.badge("JALANKAN DAN TINJAU ANALISIS", color="green")
+        st.markdown("### Guest")
+        st.markdown(
+            "- Memilih periode, metode clustering, dan parameter yang tersedia.\n"
+            "- Menjalankan analisis K-Medoids atau OPTICS.\n"
+            "- Membandingkan ringkasan cluster, proporsi wilayah, grafik sebaran, dan peta.\n"
+            "- Melihat tren tahunan serta daftar wilayah terdampak tertinggi.\n"
+            "- Mengunduh hasil clustering sebagai CSV."
+        )
+        st.caption(
+            "Guest dapat menjalankan analisis, tetapi tidak dapat mengunggah "
+            "atau mengganti dataset."
+        )
 
 st.markdown("""
     #### 🎯 Tujuan Aplikasi

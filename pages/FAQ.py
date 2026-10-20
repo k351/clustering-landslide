@@ -155,13 +155,13 @@ st.markdown(
     """
     <style>
         .faq-intro {
-            border-left: 4px solid #68836f;
+            border-left: 4px solid #3B82F6;
             padding: 4px 0 4px 18px;
             margin: 10px 0 24px;
         }
 
         .faq-kicker {
-            color: #68836f;
+            color: #3B82F6;
             font-size: 12px;
             font-weight: 700;
             letter-spacing: 1.2px;

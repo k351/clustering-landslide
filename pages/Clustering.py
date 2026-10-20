@@ -1106,18 +1106,5 @@ with data_tab:
                     f"tertinggi pada {information_year}"
                 ),
             )
-
-        st.subheader("Daftar 5 wilayah teratas per tahun")
-        st.dataframe(
-            pd.concat(annual_top_tables, ignore_index=True),
-            hide_index=True,
-            width="stretch",
-            column_config={
-                "Tahun": st.column_config.NumberColumn(format="%d"),
-                "Peringkat": st.column_config.NumberColumn(format="%d"),
-                "Kode Kabupaten": st.column_config.TextColumn("Kode Kabupaten"),
-                "Total dampak": st.column_config.NumberColumn(format="%d"),
-            },
-        )
     else:
         st.info("Belum ada data valid untuk membuat peringkat tahunan.")
