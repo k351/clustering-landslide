@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 
 import numpy as np
@@ -293,15 +294,19 @@ def cluster_regions(
     cluster_count: int,
     min_samples: int,
     xi: float | None,
-) -> tuple[pd.DataFrame, float | None, str | None]:
-    from sklearn_extra.cluster import KMedoids
-    from sklearn.metrics import silhouette_score
+) -> tuple[pd.DataFrame, dict[str, float | None], dict[str, str | None]]:
+    from sklearn.metrics import (
+        davies_bouldin_score,
+        silhouette_score,
+    )
     from sklearn.preprocessing import MinMaxScaler
 
     feature_data = regions[FEATURE_LABELS].to_numpy(dtype=float)
     scaled_features = MinMaxScaler().fit_transform(feature_data)
 
     if method == "K-Medoids":
+        from sklearn_extra.cluster import KMedoids
+
         if cluster_count >= len(regions):
             raise ValueError(
                 "Jumlah cluster k harus lebih kecil daripada jumlah wilayah valid."
@@ -331,22 +336,33 @@ def cluster_regions(
     valid_for_score = scored != -1 if method == "OPTICS" else np.ones(len(scored), dtype=bool)
     score_labels = scored[valid_for_score]
     unique_labels = np.unique(score_labels)
+    evaluation_scores: dict[str, float | None] = {
+        "silhouette": None,
+        "davies_bouldin": None,
+    }
+    evaluation_notes: dict[str, str | None] = {
+        "silhouette": None,
+        "davies_bouldin": None,
+    }
     if 2 <= len(unique_labels) < len(score_labels):
-        score = float(silhouette_score(scaled_features[valid_for_score], score_labels))
-        score_note = None
+        score_features = scaled_features[valid_for_score]
+        evaluation_scores["silhouette"] = float(
+            silhouette_score(score_features, score_labels)
+        )
+        evaluation_scores["davies_bouldin"] = float(
+            davies_bouldin_score(score_features, score_labels)
+        )
     else:
-        score = None
         if len(unique_labels) < 2:
-            score_note = (
-                "Silhouette Score memerlukan minimal dua cluster selain noise."
-            )
+            note = "Evaluasi memerlukan minimal dua cluster selain noise."
         else:
-            score_note = (
-                "Silhouette Score tidak dapat dihitung jika setiap wilayah menjadi "
+            note = (
+                "Evaluasi tidak dapat dihitung jika setiap wilayah menjadi "
                 "cluster tersendiri."
             )
+        evaluation_notes = {name: note for name in evaluation_notes}
 
-    return result, score, score_note
+    return result, evaluation_scores, evaluation_notes
 
 
 @st.cache_data(show_spinner=False)
@@ -587,22 +603,22 @@ with experiment_tab:
             st.caption("K-Medoids menggunakan jarak Euclidean pada fitur yang dinormalisasi.")
     else:
         cluster_count = 3
+        use_custom_xi = st.checkbox(
+            "Atur xi (opsional)",
+            value=False,
+            help="Jika tidak diatur, OPTICS memakai nilai xi bawaan scikit-learn (0,05).",
+        )
         with parameter_columns[0]:
             min_samples = st.slider(
                 "Min samples",
                 min_value=2,
-                max_value=30,
+                max_value=40,
                 value=5,
                 help="Jumlah minimum sampel untuk membentuk wilayah padat.",
             )
         with parameter_columns[1]:
-            use_custom_xi = st.checkbox(
-                "Atur xi (opsional)",
-                value=False,
-                help="Jika tidak diatur, OPTICS memakai nilai xi bawaan scikit-learn (0,05).",
-            )
-            xi = (
-                st.slider(
+            if use_custom_xi:
+                xi = st.slider(
                     "Xi",
                     min_value=0.01,
                     max_value=0.20,
@@ -610,9 +626,9 @@ with experiment_tab:
                     step=0.01,
                     help="Ambang sensitivitas ekstraksi cluster OPTICS metode xi.",
                 )
-                if use_custom_xi
-                else None
-            )
+            else:
+                xi = None
+                st.caption("Menggunakan xi bawaan scikit-learn: 0,05.")
         with parameter_columns[2]:
             st.caption("OPTICS dapat menandai wilayah yang tidak masuk kelompok sebagai noise.")
 
@@ -642,13 +658,15 @@ with experiment_tab:
                     source_data,
                     selected_year,
                 )
-                clustering_result, silhouette, silhouette_note = cluster_regions(
+                computation_started = time.perf_counter()
+                clustering_result, evaluation_scores, evaluation_notes = cluster_regions(
                     regional_data,
                     method,
                     cluster_count,
                     min_samples,
                     xi,
                 )
+                computation_seconds = time.perf_counter() - computation_started
         except ImportError as exc:
             st.error(
                 "Pustaka clustering belum tersedia. Pasang dependensi aplikasi "
@@ -674,8 +692,9 @@ with experiment_tab:
                 "optics_mode": "xi",
                 "dropped_rows": dropped_rows,
                 "valid_event_rows": valid_event_rows,
-                "silhouette": silhouette,
-                "silhouette_note": silhouette_note,
+                "evaluation_scores": evaluation_scores,
+                "evaluation_notes": evaluation_notes,
+                "computation_seconds": computation_seconds,
             }
 
     result = st.session_state.get("clustering_result")
@@ -713,15 +732,10 @@ with experiment_tab:
             label for label in result["Cluster"].unique() if label != "Noise"
         ]
         noise_count = int(result["Cluster"].eq("Noise").sum())
-        summary_metrics = st.columns(4)
+        summary_metrics = st.columns(3)
         summary_metrics[0].metric("Kabupaten/kota dianalisis", f"{len(result):,}")
         summary_metrics[1].metric("Cluster terbentuk", f"{len(non_noise_clusters):,}")
         summary_metrics[2].metric("Wilayah noise", f"{noise_count:,}")
-        summary_metrics[3].metric(
-            "Silhouette Score",
-            f"{metadata['silhouette']:.3f}" if metadata["silhouette"] is not None else "N/A",
-            help=metadata["silhouette_note"] or "Skor berada pada rentang -1 hingga 1; nilai lebih tinggi umumnya menunjukkan cluster lebih terpisah.",
-        )
 
         st.caption(
             f"Metode **{metadata['method']}** · "
@@ -730,8 +744,95 @@ with experiment_tab:
             f"{metadata['valid_event_rows']:,} baris kejadian valid · "
             f"{metadata['dropped_rows']:,} baris dihapus karena missing atau nilai tidak valid pada fitur yang digunakan."
         )
-        if metadata["silhouette_note"]:
-            st.warning(metadata["silhouette_note"])
+
+        st.subheader("Evaluasi hasil clustering")
+        evaluation_scores = metadata["evaluation_scores"]
+        silhouette = evaluation_scores["silhouette"]
+        if silhouette is None:
+            silhouette_interpretation = metadata["evaluation_notes"]["silhouette"]
+            silhouette_color = "gray"
+        elif silhouette >= 0.71:
+            silhouette_interpretation = (
+                "Struktur kuat: anggota dalam cluster cenderung berdekatan dan "
+                "cluster relatif terpisah."
+            )
+            silhouette_color = "green"
+        elif silhouette >= 0.51:
+            silhouette_interpretation = (
+                "Struktur sedang: cluster cukup terlihat, meski masih ada "
+                "kemiripan antarcluster."
+            )
+            silhouette_color = "yellow"
+        elif silhouette >= 0.26:
+            silhouette_interpretation = (
+                "Struktur lemah: pemisahan cluster belum kuat dan beberapa "
+                "wilayah mungkin mirip dengan cluster lain."
+            )
+            silhouette_color = "orange"
+        else:
+            silhouette_interpretation = (
+                "Belum ada struktur cluster yang jelas. Nilai negatif menunjukkan "
+                "sebagian wilayah mungkin lebih dekat ke cluster lain."
+            )
+            silhouette_color = "red"
+
+        evaluation_columns = st.columns(2, gap="medium")
+        with evaluation_columns[0]:
+            with st.container(border=True):
+                st.metric(
+                    "Silhouette Score",
+                    f"{silhouette:.4f}" if silhouette is not None else "N/A",
+                    help=(
+                        "Rentang -1 sampai 1. Nilai mendekati 1 berarti wilayah "
+                        "lebih mirip dengan cluster sendiri daripada cluster lain."
+                    ),
+                )
+                if silhouette_interpretation:
+                    st.markdown(
+                        f":{silhouette_color}[**{silhouette_interpretation}**]"
+                    )
+        with evaluation_columns[1]:
+            with st.container(border=True):
+                davies_bouldin = evaluation_scores["davies_bouldin"]
+                st.metric(
+                    "Davies–Bouldin Index",
+                    f"{davies_bouldin:.4f}" if davies_bouldin is not None else "N/A",
+                )
+                st.caption(
+                    "Semakin kecil nilainya, semakin kompak dan semakin terpisah "
+                    "cluster. Gunakan untuk membandingkan hasil pada data dan "
+                    "metode yang sama."
+                )
+
+        with st.container(border=True):
+            st.metric(
+                "Waktu komputasi (detik)",
+                f"{metadata['computation_seconds']:.4f}",
+                help=(
+                    "Waktu untuk proses clustering, termasuk normalisasi fitur "
+                    "dan perhitungan metrik evaluasi."
+                ),
+            )
+        with st.container(border=True):
+            st.markdown("**Panduan membaca Silhouette Score**")
+            st.markdown(
+                "- :green[**0,71–1,00 · Struktur kuat**] — cluster terpisah dengan baik.\n"
+                "- :yellow[**0,51–0,70 · Struktur sedang**] — pemisahan cukup terlihat.\n"
+                "- :orange[**0,26–0,50 · Struktur lemah**] — cluster masih berdekatan.\n"
+                "- :red[**Di bawah 0,26 · Struktur belum jelas**] — nilai negatif "
+                "dapat menandakan sebagian wilayah lebih cocok di cluster lain."
+            )
+
+        unavailable_metrics = [
+            note
+            for note in metadata["evaluation_notes"].values()
+            if note is not None
+        ]
+        if unavailable_metrics:
+            st.info(
+                "Metrik tidak dapat dihitung: "
+                + " ".join(dict.fromkeys(unavailable_metrics))
+            )
 
         st.divider()
         st.subheader("Ringkasan kategori cluster")
@@ -946,6 +1047,56 @@ with experiment_tab:
             "Setiap titik mewakili satu kabupaten/kota. Nilai pada grafik adalah akumulasi "
             "dampak pada rentang tahun yang dipilih."
         )
+
+        st.subheader("Boxplot distribusi indikator per cluster")
+        st.caption(
+            "Box menunjukkan median dan sebaran dampak antarwilayah dalam setiap "
+            "cluster. Titik di luar whisker menandai kemungkinan nilai ekstrem."
+        )
+        for row_start in range(0, len(FEATURE_LABELS), 2):
+            boxplot_columns = st.columns(2, gap="medium")
+            for column, feature_index in zip(
+                boxplot_columns,
+                range(row_start, min(row_start + 2, len(FEATURE_LABELS))),
+            ):
+                feature = FEATURE_LABELS[feature_index]
+                with column:
+                    with st.container(border=True):
+                        st.markdown(f"**Distribusi {feature}**")
+                        st.vega_lite_chart(
+                            result[["Cluster", feature]],
+                            {
+                                "width": "container",
+                                "height": 330,
+                                "mark": {"type": "boxplot", "extent": 1.5},
+                                "encoding": {
+                                    "x": {
+                                        "field": "Cluster",
+                                        "type": "nominal",
+                                        "sort": cluster_order,
+                                        "axis": {"title": "Cluster"},
+                                    },
+                                    "y": {
+                                        "field": feature,
+                                        "type": "quantitative",
+                                        "axis": {"title": feature},
+                                    },
+                                    "color": {
+                                        "field": "Cluster",
+                                        "type": "nominal",
+                                        "scale": {
+                                            "domain": cluster_order,
+                                            "range": cluster_colors,
+                                        },
+                                        "legend": None,
+                                    },
+                                },
+                                "config": {"view": {"stroke": None}},
+                            },
+                            width="stretch",
+                            key=f"cluster_indicator_boxplot_{feature_index}",
+                            alt=f"Distribusi {feature.casefold()} pada setiap cluster",
+                        )
 
         st.subheader("Peta persebaran wilayah")
         map_legend = [
