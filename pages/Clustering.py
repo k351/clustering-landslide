@@ -597,6 +597,141 @@ def _cluster_summary(result: pd.DataFrame) -> pd.DataFrame:
     return summary
 
 
+def _candidate_quality(evaluation_scores: dict[str, float | None]) -> float:
+    """Gunakan Silhouette Score sebagai satu-satunya skor pemilihan kandidat."""
+    silhouette = evaluation_scores.get("silhouette")
+    if silhouette is None:
+        return float("-inf")
+    return float(silhouette)
+
+
+def _pick_best_kmedoids(regions: pd.DataFrame, max_k: int = 7) -> dict[str, object]:
+    """Cari k terbaik untuk K-Medoids berdasarkan silhouette score."""
+    best_choice: dict[str, object] | None = None
+    limit = min(max_k, max(2, len(regions) - 1))
+    for cluster_count in range(2, limit + 1):
+        candidate_result, candidate_scores, candidate_notes = cluster_regions(
+            regions,
+            method="K-Medoids",
+            cluster_count=cluster_count,
+            min_samples=5,
+            xi=None,
+        )
+        score = _candidate_quality(candidate_scores)
+        candidate = {
+            "method": "K-Medoids",
+            "cluster_count": cluster_count,
+            "min_samples": 5,
+            "xi": None,
+            "result": candidate_result,
+            "evaluation_scores": candidate_scores,
+            "evaluation_notes": candidate_notes,
+            "score": score,
+        }
+        if best_choice is None or candidate["score"] > best_choice["score"]:
+            best_choice = candidate
+
+    if best_choice is None:
+        raise ValueError("Tidak ada kombinasi K-Medoids yang valid untuk dataset ini.")
+    return best_choice
+
+
+def _pick_best_optics(regions: pd.DataFrame, max_min_samples: int = 40) -> dict[str, object]:
+    """Pilih OPTICS dengan cakupan terbesar di antara kandidat valid."""
+    best_choice: dict[str, object] | None = None
+    best_quality = (-1, float("-inf"))
+    candidate_rows: list[dict[str, object]] = []
+    max_min = min(max_min_samples, max(2, len(regions) - 1))
+    xi_values = [round(value, 2) for value in np.arange(0.01, 0.20, 0.02)]
+    for min_samples in range(2, max_min + 1):
+        for xi in xi_values:
+            candidate_result, candidate_scores, candidate_notes = cluster_regions(
+                regions,
+                method="OPTICS",
+                cluster_count=3,
+                min_samples=min_samples,
+                xi=xi,
+            )
+            clustered_region_count = int(candidate_result["Cluster"].ne("Noise").sum())
+            cluster_count = int(
+                candidate_result.loc[
+                    candidate_result["Cluster"].ne("Noise"), "Cluster"
+                ].nunique()
+            )
+            silhouette = candidate_scores.get("silhouette")
+            eligible = cluster_count >= 2 and silhouette is not None
+            quality = (
+                clustered_region_count,
+                float(silhouette) if silhouette is not None else float("-inf"),
+            ) if eligible else (-1, float("-inf"))
+            candidate_row = {
+                "Min samples": min_samples,
+                "Xi": xi,
+                "Wilayah ter-cluster": clustered_region_count,
+                "Cluster terbentuk": cluster_count,
+                "Silhouette Score": silhouette,
+                "Layak": eligible,
+                "Keterangan": (
+                    "Kandidat valid"
+                    if eligible
+                    else (
+                        "Ditolak: perlu minimal 2 cluster"
+                        if cluster_count < 2
+                        else "Ditolak: Silhouette Score tidak tersedia"
+                    )
+                ),
+                "Terpilih": False,
+            }
+            candidate_rows.append(candidate_row)
+            candidate = {
+                "method": "OPTICS",
+                "cluster_count": cluster_count,
+                "min_samples": min_samples,
+                "xi": xi,
+                "result": candidate_result,
+                "evaluation_scores": candidate_scores,
+                "evaluation_notes": candidate_notes,
+                "clustered_region_count": clustered_region_count,
+                "score": quality,
+                "candidate_rows": candidate_rows,
+            }
+            if eligible and quality > best_quality:
+                best_choice = candidate
+                best_quality = quality
+
+    if best_choice is None:
+        raise ValueError(
+            "Tidak ditemukan konfigurasi OPTICS dengan minimal dua cluster dan "
+            "Silhouette Score yang dapat dihitung."
+        )
+    for candidate_row in candidate_rows:
+        candidate_row["Terpilih"] = (
+            candidate_row["Min samples"] == best_choice["min_samples"]
+            and candidate_row["Xi"] == best_choice["xi"]
+        )
+    best_choice["candidate_rows"] = candidate_rows
+    return best_choice
+
+
+def _cluster_profile(result: pd.DataFrame) -> pd.DataFrame:
+    """Hitung rata-rata fitur untuk cluster valid, tanpa memasukkan label Noise."""
+    clustered_regions = result.loc[result["Cluster"].ne("Noise")]
+    if clustered_regions.empty:
+        return pd.DataFrame(columns=["Cluster", *FEATURE_LABELS])
+
+    profile = (
+        clustered_regions.groupby("Cluster")[FEATURE_LABELS]
+        .mean()
+        .reset_index()
+    )
+    return profile.sort_values(
+        "Cluster",
+        key=lambda values: values.map(
+            lambda label: int(label.rsplit(" ", 1)[-1])
+        ),
+    )
+
+
 if not is_logged_in():
     require_login()
     st.stop()
@@ -658,7 +793,7 @@ with experiment_tab:
 
     st.markdown('<div class="section-kicker">Atur analisis</div>', unsafe_allow_html=True)
     with st.container(border=True):
-        control_year, control_method = st.columns([1, 1.2])
+        control_year, control_method, control_mode = st.columns([1, 1.2, 1.5])
         with control_year:
             year_options: list[str | int] = ["Semua tahun (2014–2025)", *available_years]
             selected_year_option = st.selectbox(
@@ -673,6 +808,14 @@ with experiment_tab:
                 help="K-Medoids membagi wilayah ke k kelompok; OPTICS menemukan "
                 "kelompok berbasis kepadatan dan dapat menandai noise.",
             )
+        with control_mode:
+            cluster_mode = st.selectbox(
+                "Mode pencarian parameter",
+                ("Cari konfigurasi terbaik", "Gunakan parameter manual"),
+                index=0,
+                help="Pilih otomatis untuk mencari konfigurasi terbaik; kriteria mengikuti metode yang dipilih, "
+                "atau manual jika ingin menentukan nilai parameter sendiri.",
+            )
 
     selected_year = (
         None
@@ -681,48 +824,69 @@ with experiment_tab:
     )
     parameter_columns = st.columns([1, 1, 1.2])
     if method == "K-Medoids":
-        with parameter_columns[0]:
-            cluster_count = st.slider(
-                "Jumlah cluster (k)",
-                min_value=2,
-                max_value=12,
-                value=3,
-                help="Jumlah kelompok yang akan dibentuk.",
-            )
-        min_samples = 5
-        xi = None
-        with parameter_columns[1]:
-            st.caption("K-Medoids menggunakan jarak Euclidean pada fitur yang dinormalisasi.")
+        if cluster_mode == "Gunakan parameter manual":
+            with parameter_columns[0]:
+                cluster_count = st.slider(
+                    "Jumlah cluster (k)",
+                    min_value=2,
+                    max_value=12,
+                    value=3,
+                    help="Jumlah kelompok yang akan dibentuk.",
+                )
+            min_samples = 5
+            xi = None
+            with parameter_columns[1]:
+                st.caption("K-Medoids menggunakan jarak Euclidean pada fitur yang dinormalisasi.")
+        else:
+            cluster_count = 3
+            min_samples = 5
+            xi = None
+            with parameter_columns[0]:
+                st.caption("Aplikasi akan mencari k terbaik dari 2 sampai 7 berdasarkan silhouette score.")
+            with parameter_columns[1]:
+                st.caption("Parameter terbaik akan dipilih otomatis untuk hasil clustering yang paling stabil.")
+            with parameter_columns[2]:
+                st.caption("Mode ini cocok untuk skripsi karena hasil didasarkan pada evaluasi objektif, bukan asumsi manual.")
     else:
         cluster_count = 3
-        use_custom_xi = st.checkbox(
-            "Atur xi (opsional)",
-            value=False,
-            help="Jika tidak diatur, OPTICS memakai nilai xi bawaan scikit-learn (0,05).",
-        )
-        with parameter_columns[0]:
-            min_samples = st.slider(
-                "Min samples",
-                min_value=2,
-                max_value=40,
-                value=5,
-                help="Jumlah minimum sampel untuk membentuk wilayah padat.",
+        if cluster_mode == "Gunakan parameter manual":
+            use_custom_xi = st.checkbox(
+                "Atur xi (opsional)",
+                value=False,
+                help="Jika tidak diatur, OPTICS memakai nilai xi bawaan scikit-learn (0,05).",
             )
-        with parameter_columns[1]:
-            if use_custom_xi:
-                xi = st.slider(
-                    "Xi",
-                    min_value=0.01,
-                    max_value=0.20,
-                    value=0.05,
-                    step=0.01,
-                    help="Ambang sensitivitas ekstraksi cluster OPTICS metode xi.",
+            with parameter_columns[0]:
+                min_samples = st.slider(
+                    "Min samples",
+                    min_value=2,
+                    max_value=40,
+                    value=5,
+                    help="Jumlah minimum sampel untuk membentuk wilayah padat.",
                 )
-            else:
-                xi = None
-                st.caption("Menggunakan xi bawaan scikit-learn: 0,05.")
-        with parameter_columns[2]:
-            st.caption("OPTICS dapat menandai wilayah yang tidak masuk kelompok sebagai noise.")
+            with parameter_columns[1]:
+                if use_custom_xi:
+                    xi = st.slider(
+                        "Xi",
+                        min_value=0.01,
+                        max_value=0.20,
+                        value=0.05,
+                        step=0.01,
+                        help="Ambang sensitivitas ekstraksi cluster OPTICS metode xi.",
+                    )
+                else:
+                    xi = None
+                    st.caption("Menggunakan xi bawaan scikit-learn: 0,05.")
+            with parameter_columns[2]:
+                st.caption("OPTICS dapat menandai wilayah yang tidak masuk kelompok sebagai noise.")
+        else:
+            min_samples = 5
+            xi = None
+            with parameter_columns[0]:
+                st.caption("Grid otomatis: min_samples 2–40 (atau sampai jumlah wilayah−1), xi 0,01–0,19 dengan interval 0,02.")
+            with parameter_columns[1]:
+                st.caption("Syarat: minimal 2 cluster dan Silhouette Score tersedia. Terbanyak wilayah non-noise menang; silhouette memecahkan seri.")
+            with parameter_columns[2]:
+                st.caption("Semua kandidat beserta jumlah cluster, cakupan, dan skor akan ditampilkan setelah proses.")
 
     run_analysis = st.button(
         "Jalankan clustering",
@@ -751,13 +915,33 @@ with experiment_tab:
                     selected_year,
                 )
                 computation_started = time.perf_counter()
-                clustering_result, evaluation_scores, evaluation_notes = cluster_regions(
-                    regional_data,
-                    method,
-                    cluster_count,
-                    min_samples,
-                    xi,
-                )
+                search_candidates = None
+                if cluster_mode == "Cari konfigurasi terbaik":
+                    if method == "K-Medoids":
+                        best_choice = _pick_best_kmedoids(regional_data)
+                        clustering_result = best_choice["result"]
+                        evaluation_scores = best_choice["evaluation_scores"]
+                        evaluation_notes = best_choice["evaluation_notes"]
+                        cluster_count = int(best_choice["cluster_count"])
+                        min_samples = int(best_choice["min_samples"])
+                        xi = best_choice["xi"]
+                    else:
+                        best_choice = _pick_best_optics(regional_data)
+                        clustering_result = best_choice["result"]
+                        evaluation_scores = best_choice["evaluation_scores"]
+                        evaluation_notes = best_choice["evaluation_notes"]
+                        cluster_count = int(best_choice["cluster_count"])
+                        min_samples = int(best_choice["min_samples"])
+                        xi = best_choice["xi"]
+                        search_candidates = best_choice["candidate_rows"]
+                else:
+                    clustering_result, evaluation_scores, evaluation_notes = cluster_regions(
+                        regional_data,
+                        method,
+                        cluster_count,
+                        min_samples,
+                        xi,
+                    )
                 computation_seconds = time.perf_counter() - computation_started
         except ImportError as exc:
             st.error(
@@ -787,6 +971,8 @@ with experiment_tab:
                 "evaluation_scores": evaluation_scores,
                 "evaluation_notes": evaluation_notes,
                 "computation_seconds": computation_seconds,
+                "cluster_mode": cluster_mode,
+                "search_candidates": search_candidates,
             }
 
     result = st.session_state.get("clustering_result")
@@ -801,9 +987,15 @@ with experiment_tab:
         metadata["method"] != method
         or metadata["year"] != selected_year
         or metadata.get("dataset_version") != dataset_version
-        or metadata["cluster_count"] != cluster_count
-        or metadata["min_samples"] != min_samples
-        or metadata.get("xi") != xi
+        or metadata.get("cluster_mode") != cluster_mode
+        or (
+            cluster_mode == "Gunakan parameter manual"
+            and (
+                metadata["cluster_count"] != cluster_count
+                or metadata["min_samples"] != min_samples
+                or metadata.get("xi") != xi
+            )
+        )
         or metadata.get("optics_mode") != "xi"
     ):
         st.info("Pengaturan berubah. Jalankan clustering kembali untuk memperbarui hasil.")
@@ -820,6 +1012,8 @@ with experiment_tab:
                 else f"min_samples={metadata['min_samples']}, xi=bawaan 0,05"
             )
         )
+        if metadata.get("cluster_mode") == "Cari konfigurasi terbaik":
+            cluster_parameters += " (terbaik otomatis)"
         non_noise_clusters = [
             label for label in result["Cluster"].unique() if label != "Noise"
         ]
@@ -836,6 +1030,39 @@ with experiment_tab:
             f"{metadata['valid_event_rows']:,} baris kejadian valid · "
             f"{metadata['dropped_rows']:,} baris dihapus karena missing atau nilai tidak valid pada fitur yang digunakan."
         )
+
+        if (
+            metadata["method"] == "OPTICS"
+            and metadata.get("cluster_mode") == "Cari konfigurasi terbaik"
+            and metadata.get("search_candidates")
+        ):
+            candidate_table = pd.DataFrame(metadata["search_candidates"])
+            candidate_table = candidate_table.sort_values(
+                ["Layak", "Wilayah ter-cluster", "Silhouette Score"],
+                ascending=[False, False, False],
+                na_position="last",
+                kind="stable",
+            )
+            with st.expander("Detail pencarian konfigurasi OPTICS"):
+                st.caption(
+                    f"{len(candidate_table):,} kombinasi diuji. Konfigurasi dipilih "
+                    "dari kandidat yang membentuk minimal 2 cluster dan memiliki "
+                    "Silhouette Score terhitung; cakupan non-noise tertinggi menang, "
+                    "lalu Silhouette Score menjadi pemecah seri."
+                )
+                st.dataframe(
+                    candidate_table,
+                    hide_index=True,
+                    width="stretch",
+                    height=360,
+                    column_config={
+                        "Min samples": st.column_config.NumberColumn(format="%d"),
+                        "Xi": st.column_config.NumberColumn(format="%.2f"),
+                        "Wilayah ter-cluster": st.column_config.NumberColumn(format="%d"),
+                        "Cluster terbentuk": st.column_config.NumberColumn(format="%d"),
+                        "Silhouette Score": st.column_config.NumberColumn(format="%.4f"),
+                    },
+                )
 
         st.subheader("Evaluasi hasil clustering")
         evaluation_scores = metadata["evaluation_scores"]
@@ -940,6 +1167,68 @@ with experiment_tab:
                 "Fasilitas Umum Rusak": st.column_config.NumberColumn(format="%d"),
             },
         )
+
+        st.subheader("Ringkasan karakteristik cluster")
+        st.caption(
+            "Setiap indikator membandingkan rata-rata cluster dengan rata-rata "
+            "nilai cluster non-noise lainnya. Label cluster bukan tingkat kerawanan."
+        )
+        cluster_profile = _cluster_profile(result)
+        if cluster_profile.empty:
+            st.info(
+                "Belum ada cluster non-noise yang dapat diprofilkan. "
+                "Pada metode OPTICS, periksa kembali parameter jika semua wilayah "
+                "tergolong noise."
+            )
+        else:
+            cluster_sizes = result.loc[result["Cluster"].ne("Noise")].groupby(
+                "Cluster"
+            ).size()
+            profile_columns = st.columns(2, gap="medium")
+            for cluster_index, (_, profile_row) in enumerate(
+                cluster_profile.iterrows()
+            ):
+                cluster_name = str(profile_row["Cluster"])
+                other_clusters = cluster_profile.loc[
+                    cluster_profile["Cluster"].ne(cluster_name)
+                ]
+                with profile_columns[cluster_index % len(profile_columns)]:
+                    with st.container(border=True):
+                        st.markdown(f"### :blue[{cluster_name}]")
+                        st.caption(
+                            f"{cluster_sizes.get(cluster_name, 0):,} kabupaten/kota"
+                        )
+                        if other_clusters.empty:
+                            st.markdown(
+                                "Belum dapat dibandingkan karena hanya ada satu "
+                                "cluster non-noise."
+                            )
+                            continue
+
+                        for feature in FEATURE_LABELS:
+                            cluster_mean = float(profile_row[feature])
+                            other_cluster_mean = float(other_clusters[feature].mean())
+                            if np.isclose(
+                                cluster_mean,
+                                other_cluster_mean,
+                                rtol=1e-9,
+                                atol=1e-9,
+                            ):
+                                comparison = "setara dengan"
+                            elif cluster_mean > other_cluster_mean:
+                                comparison = "lebih tinggi daripada"
+                            else:
+                                comparison = "lebih rendah daripada"
+                            st.markdown(
+                                f"- **{feature}**: {cluster_mean:,.2f}, "
+                                f"{comparison} rata-rata cluster lain "
+                                f"({other_cluster_mean:,.2f})."
+                            )
+        if noise_count:
+            st.info(
+                f"{noise_count:,} wilayah berlabel Noise tidak disertakan dalam "
+                "profil karena tidak termasuk ke cluster yang terbentuk."
+            )
 
         st.subheader("Distribusi wilayah per cluster")
         st.caption(
