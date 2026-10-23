@@ -246,7 +246,6 @@ col_feature_admin, col_feature_guest = st.columns(2, gap="large")
 
 with col_feature_admin:
     with st.container(border=True):
-        st.badge("KELOLA DATA DAN ANALISIS", color="blue")
         st.markdown("### Administrator")
         st.markdown(
             "- Meninjau dataset aktif dan mencari data pada tabel.\n"
@@ -262,7 +261,6 @@ with col_feature_admin:
 
 with col_feature_guest:
     with st.container(border=True):
-        st.badge("JALANKAN DAN TINJAU ANALISIS", color="green")
         st.markdown("### Guest")
         st.markdown(
             "- Memilih periode, metode clustering, dan parameter yang tersedia.\n"

@@ -105,10 +105,20 @@ st.markdown(
 
 
 def _normalized_column_name(value: object) -> str:
+    """Normalisasi nama kolom agar variasi huruf dan tanda baca bisa dicocokkan."""
     return re.sub(r"[^a-z0-9]+", " ", str(value).casefold()).strip()
 
 
 def _find_column(columns: pd.Index, aliases: tuple[str, ...]) -> str | None:
+    """Cari nama kolom yang cocok dengan salah satu alias secara tidak peka format.
+
+    Args:
+        columns: Daftar nama kolom pada dataset.
+        aliases: Nama kolom alternatif yang dapat diterima.
+
+    Returns:
+        Nama kolom asli yang cocok, atau ``None`` jika tidak ditemukan.
+    """
     normalized = {_normalized_column_name(column): str(column) for column in columns}
     for alias in aliases:
         match = normalized.get(_normalized_column_name(alias))
@@ -118,6 +128,10 @@ def _find_column(columns: pd.Index, aliases: tuple[str, ...]) -> str | None:
 
 
 def _region_code_key(value: object) -> str | None:
+    """Ubah kode wilayah menjadi kunci digit empat karakter untuk pencocokan peta.
+
+    Nilai kosong atau tanpa digit akan menghasilkan ``None``.
+    """
     if pd.isna(value):
         return None
 
@@ -141,12 +155,14 @@ def _region_code_key(value: object) -> str | None:
 
 
 def _display_region_code(code_key: str) -> str:
+    """Format kunci kode wilayah empat digit dengan titik pemisah."""
     if len(code_key) == 4:
         return f"{code_key[:2]}.{code_key[2:]}"
     return code_key
 
 
 def _cluster_color(label: str) -> str:
+    """Pilih warna peta untuk label cluster atau label noise."""
     if label == "Noise":
         return "#64748b"
     cluster_number = int(label.rsplit(" ", 1)[-1])
@@ -154,6 +170,18 @@ def _cluster_color(label: str) -> str:
 
 
 def _resolve_impact_columns(columns: pd.Index) -> dict[str, list[str]]:
+    """Temukan kolom dampak yang diperlukan dan kelompokkan menurut jenis fitur.
+
+    Args:
+        columns: Daftar nama kolom pada dataset.
+
+    Returns:
+        Kolom sumber untuk korban meninggal, warga terdampak, kerusakan rumah,
+        dan kerusakan fasilitas umum.
+
+    Raises:
+        ValueError: Jika satu atau lebih kelompok kolom wajib tidak ditemukan.
+    """
     fatalities = _find_column(columns, ("Meninggal",))
     missing = []
     if fatalities is None:
@@ -224,6 +252,22 @@ def prepare_regional_data(
     dataset: pd.DataFrame,
     selected_year: int | None,
 ) -> tuple[pd.DataFrame, int, int]:
+    """Siapkan dan agregasikan fitur dampak longsor untuk setiap kabupaten.
+
+    Data dapat difilter berdasarkan tahun. Baris dengan informasi wilayah atau
+    nilai fitur yang tidak valid dihapus sebelum jumlah dampak dijumlahkan.
+
+    Args:
+        dataset: Data kejadian longsor yang memuat kolom wilayah, tahun, dan dampak.
+        selected_year: Tahun yang dipilih, atau ``None`` untuk semua tahun.
+
+    Returns:
+        Tuple berisi data fitur per kabupaten, jumlah baris yang dihapus, dan
+        jumlah baris valid yang digunakan.
+
+    Raises:
+        ValueError: Jika kolom wajib tidak tersedia atau tidak ada baris valid.
+    """
     code_column = _find_column(dataset.columns, ("Kode Kabupaten",))
     name_column = _find_column(dataset.columns, ("Kabupaten",))
     year_column = _find_column(dataset.columns, ("Tahun",))
@@ -295,6 +339,26 @@ def cluster_regions(
     min_samples: int,
     xi: float | None,
 ) -> tuple[pd.DataFrame, dict[str, float | None], dict[str, str | None]]:
+    """Kelompokkan wilayah dengan K-Medoids atau OPTICS dan hitung metrik evaluasi.
+
+    Fitur dampak dinormalisasi sebelum clustering. Noise OPTICS dikecualikan dari
+    perhitungan metrik evaluasi.
+
+    Args:
+        regions: Data wilayah yang telah disiapkan beserta fitur dampaknya.
+        method: Metode clustering, yaitu ``"K-Medoids"`` atau ``"OPTICS"``.
+        cluster_count: Jumlah cluster yang digunakan oleh K-Medoids.
+        min_samples: Jumlah minimum sampel untuk metode OPTICS.
+        xi: Parameter ``xi`` OPTICS, atau ``None`` untuk menggunakan nilai default.
+
+    Returns:
+        Tuple berisi hasil wilayah berlabel cluster, nilai metrik evaluasi, dan
+        catatan jika metrik tidak dapat dihitung.
+
+    Raises:
+        ValueError: Jika jumlah cluster K-Medoids tidak lebih kecil dari jumlah
+            wilayah valid.
+    """
     from sklearn.metrics import (
         davies_bouldin_score,
         silhouette_score,
@@ -367,12 +431,32 @@ def cluster_regions(
 
 @st.cache_data(show_spinner=False)
 def load_geojson(path: str, modified_at: float) -> dict:
+    """Muat data batas wilayah GeoJSON untuk ditampilkan pada peta.
+
+    Args:
+        path: Lokasi file GeoJSON.
+        modified_at: Waktu modifikasi file, digunakan sebagai bagian dari kunci cache.
+
+    Returns:
+        Isi file GeoJSON dalam bentuk dictionary.
+    """
     del modified_at
     with Path(path).open(encoding="utf-8") as geojson_file:
         return json.load(geojson_file)
 
 
 def render_cluster_map(result: pd.DataFrame) -> int:
+    """Tampilkan peta cluster kabupaten dan kembalikan jumlah wilayah yang terpetakan.
+
+    Pencocokan batas wilayah menggunakan kode wilayah, lalu nama wilayah yang unik
+    sebagai fallback.
+
+    Args:
+        result: Hasil clustering yang memuat kode, nama, label, dan fitur dampak.
+
+    Returns:
+        Jumlah wilayah hasil clustering yang berhasil dicocokkan ke batas peta.
+    """
     import folium
     from streamlit_folium import st_folium
 
@@ -487,15 +571,23 @@ def render_cluster_map(result: pd.DataFrame) -> int:
 
 
 def _cluster_summary(result: pd.DataFrame) -> pd.DataFrame:
+    """Hitung jumlah wilayah dan rata-rata dampak longsor untuk setiap cluster.
+
+    Args:
+        result: Data wilayah yang telah memiliki label ``Cluster`` dan fitur dampak.
+
+    Returns:
+        Ringkasan jumlah wilayah serta rata-rata korban dan kerusakan per cluster.
+    """
     summary = (
         result.groupby("Cluster", as_index=False)
         .agg(
             **{
                 "Jumlah Wilayah": ("Kabupaten", "count"),
-                "Korban Meninggal": (FEATURE_LABELS[0], "sum"),
-                "Jiwa Terdampak": (FEATURE_LABELS[1], "sum"),
-                "Rumah Rusak": (FEATURE_LABELS[2], "sum"),
-                "Fasilitas Umum Rusak": (FEATURE_LABELS[3], "sum"),
+                "Korban Meninggal": (FEATURE_LABELS[0], "mean"),
+                "Jiwa Terdampak": (FEATURE_LABELS[1], "mean"),
+                "Rumah Rusak": (FEATURE_LABELS[2], "mean"),
+                "Fasilitas Umum Rusak": (FEATURE_LABELS[3], "mean"),
             }
         )
         .sort_values("Cluster", key=lambda values: values.map(
@@ -835,7 +927,7 @@ with experiment_tab:
             )
 
         st.divider()
-        st.subheader("Ringkasan kategori cluster")
+        st.subheader("Ringkasan kategori mean cluster")
         st.dataframe(
             _cluster_summary(result),
             hide_index=True,
