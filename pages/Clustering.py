@@ -166,7 +166,7 @@ def _cluster_color(label: str) -> str:
     if label == "Noise":
         return "#64748b"
     cluster_number = int(label.rsplit(" ", 1)[-1])
-    return CLUSTER_PALETTE[(cluster_number - 1) % len(CLUSTER_PALETTE)]
+    return CLUSTER_PALETTE[cluster_number % len(CLUSTER_PALETTE)]
 
 
 def _resolve_impact_columns(columns: pd.Index) -> dict[str, list[str]]:
@@ -379,7 +379,7 @@ def cluster_regions(
         labels = model.fit_predict(scaled_features)
     else:
         from sklearn.cluster import OPTICS
- 
+
         optics = OPTICS(
             min_samples=min_samples,
             metric="euclidean",
@@ -393,7 +393,7 @@ def cluster_regions(
     result = regions.copy()
     result["_label_number"] = labels.astype(int)
     result["Cluster"] = result["_label_number"].map(
-        lambda label: "Noise" if label == -1 else f"Cluster {label + 1}"
+        lambda label: "Noise" if label == -1 else f"Cluster {label}"
     )
 
     scored = result["_label_number"].to_numpy()
@@ -1271,7 +1271,7 @@ with experiment_tab:
             "#64748b"
             if label == "Noise"
             else CLUSTER_PALETTE[
-                (int(label.rsplit(" ", 1)[-1]) - 1) % len(CLUSTER_PALETTE)
+                int(label.rsplit(" ", 1)[-1]) % len(CLUSTER_PALETTE)
             ]
             for label in cluster_order
         ]
