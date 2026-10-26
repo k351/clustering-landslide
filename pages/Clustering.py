@@ -379,7 +379,7 @@ def cluster_regions(
         labels = model.fit_predict(scaled_features)
     else:
         from sklearn.cluster import OPTICS
-
+ 
         optics = OPTICS(
             min_samples=min_samples,
             metric="euclidean",
