@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import time
@@ -44,6 +45,7 @@ CLUSTER_PALETTE = (
     "#be123c",
     "#a16207",
 )
+CLUSTER_LABEL_ORDER = "normalized_impact_mean_ascending_v1"
 
 st.markdown(
     """
@@ -66,7 +68,7 @@ st.markdown(
             margin-bottom: .45rem;
         }
         .cluster-hero h1 {
-            color: #f8fafc;
+            color: #3B82F6;
             font-size: clamp(1.8rem, 3vw, 2.55rem);
             line-height: 1.15;
             margin: 0 0 .65rem;
@@ -164,9 +166,15 @@ def _display_region_code(code_key: str) -> str:
 def _cluster_color(label: str) -> str:
     """Pilih warna peta untuk label cluster atau label noise."""
     if label == "Noise":
-        return "#64748b"
+        return "#6b7280"
     cluster_number = int(label.rsplit(" ", 1)[-1])
     return CLUSTER_PALETTE[cluster_number % len(CLUSTER_PALETTE)]
+
+
+def _clear_clustering_result() -> None:
+    """Hapus hasil lama saat filter atau parameter clustering berubah."""
+    st.session_state.pop("clustering_result", None)
+    st.session_state.pop("clustering_metadata", None)
 
 
 def _resolve_impact_columns(columns: pd.Index) -> dict[str, list[str]]:
@@ -316,6 +324,7 @@ def prepare_regional_data(
     work[FEATURE_LABELS[1]] = work[impact_columns["affected_people"]].sum(axis=1)
     work[FEATURE_LABELS[2]] = work[impact_columns["house_damage"]].sum(axis=1)
     work[FEATURE_LABELS[3]] = work[impact_columns["facility_damage"]].sum(axis=1)
+    work["Jumlah Kejadian"] = 1
     work["Kode Kabupaten"] = work["_region_code_key"].map(_display_region_code)
     work["Kabupaten"] = work["_region_name"].astype(str)
 
@@ -324,7 +333,7 @@ def prepare_regional_data(
             ["_region_code_key", "Kode Kabupaten", "Kabupaten"],
             as_index=False,
             sort=True,
-        )[FEATURE_LABELS]
+        )[[*FEATURE_LABELS, "Jumlah Kejadian"]]
         .sum()
         .rename(columns={"_region_code_key": "_kode_peta"})
     )
@@ -375,7 +384,7 @@ def cluster_regions(
             raise ValueError(
                 "Jumlah cluster k harus lebih kecil daripada jumlah wilayah valid."
             )
-        model = KMedoids(n_clusters=cluster_count, random_state=42, method="pam", metric="euclidean")
+        model = KMedoids(n_clusters=cluster_count, random_state=42, metric="euclidean")
         labels = model.fit_predict(scaled_features)
     else:
         from sklearn.cluster import OPTICS
@@ -390,8 +399,26 @@ def cluster_regions(
             optics.set_params(xi=xi)
         labels = optics.fit_predict(scaled_features)
 
+    cluster_label_order = sorted(
+        (int(label) for label in np.unique(labels) if label != -1),
+        key=lambda label: (
+            float(scaled_features[labels == label].mean()),
+            label,
+        ),
+    )
+    canonical_labels = {
+        label: index for index, label in enumerate(cluster_label_order)
+    }
+    labels = np.array(
+        [
+            -1 if label == -1 else canonical_labels[int(label)]
+            for label in labels
+        ],
+        dtype=int,
+    )
+
     result = regions.copy()
-    result["_label_number"] = labels.astype(int)
+    result["_label_number"] = labels
     result["Cluster"] = result["_label_number"].map(
         lambda label: "Noise" if label == -1 else f"Cluster {label}"
     )
@@ -445,7 +472,11 @@ def load_geojson(path: str, modified_at: float) -> dict:
         return json.load(geojson_file)
 
 
-def render_cluster_map(result: pd.DataFrame) -> int:
+def render_cluster_map(
+    result: pd.DataFrame,
+    *,
+    map_key: str = "landslide_cluster_map",
+) -> int:
     """Tampilkan peta cluster kabupaten dan kembalikan jumlah wilayah yang terpetakan.
 
     Pencocokan batas wilayah menggunakan kode wilayah, lalu nama wilayah yang unik
@@ -453,6 +484,7 @@ def render_cluster_map(result: pd.DataFrame) -> int:
 
     Args:
         result: Hasil clustering yang memuat kode, nama, label, dan fitur dampak.
+        map_key: Kunci unik komponen peta Streamlit.
 
     Returns:
         Jumlah wilayah hasil clustering yang berhasil dicocokkan ke batas peta.
@@ -503,12 +535,14 @@ def render_cluster_map(result: pd.DataFrame) -> int:
             properties["jumlah_meninggal"] = "—"
             properties["jiwa_terdampak"] = "—"
             properties["rumah_rusak"] = "—"
+            properties["fasilitas_umum_rusak"] = "—"
             continue
         mapped_region_codes.add(region["_kode_peta"])
         properties["cluster_label"] = region["Cluster"]
         properties["jumlah_meninggal"] = f"{region[FEATURE_LABELS[0]]:,.0f}"
         properties["jiwa_terdampak"] = f"{region[FEATURE_LABELS[1]]:,.0f}"
         properties["rumah_rusak"] = f"{region[FEATURE_LABELS[2]]:,.0f}"
+        properties["fasilitas_umum_rusak"] = f"{region[FEATURE_LABELS[3]]:,.0f}"
 
     folium_map = folium.Map(
         location=[-2.5, 118.0],
@@ -525,9 +559,21 @@ def render_cluster_map(result: pd.DataFrame) -> int:
                 feature["properties"].get("cluster_label"),
                 "#cbd5e1",
             ),
-            "color": "#ffffff",
-            "weight": 0.45,
-            "fillOpacity": 0.72,
+            "color": (
+                "#334155"
+                if feature["properties"].get("cluster_label") == "Noise"
+                else "#ffffff"
+            ),
+            "weight": (
+                0.8
+                if feature["properties"].get("cluster_label") == "Noise"
+                else 0.45
+            ),
+            "fillOpacity": (
+                0.9
+                if feature["properties"].get("cluster_label") == "Noise"
+                else 0.72
+            ),
         },
         highlight_function=lambda _: {
             "color": "#0f172a",
@@ -543,6 +589,7 @@ def render_cluster_map(result: pd.DataFrame) -> int:
                 "jumlah_meninggal",
                 "jiwa_terdampak",
                 "rumah_rusak",
+                "fasilitas_umum_rusak",
             ],
             aliases=[
                 "Kabupaten/kota:",
@@ -552,6 +599,7 @@ def render_cluster_map(result: pd.DataFrame) -> int:
                 "Korban meninggal:",
                 "Jiwa terdampak:",
                 "Rumah rusak:",
+                "Fasilitas umum rusak:",
             ],
             localize=True,
             sticky=False,
@@ -565,7 +613,7 @@ def render_cluster_map(result: pd.DataFrame) -> int:
         width=1100,
         height=530,
         returned_objects=[],
-        key="landslide_cluster_map",
+        key=map_key,
     )
     return len(mapped_region_codes)
 
@@ -799,12 +847,16 @@ with experiment_tab:
             selected_year_option = st.selectbox(
                 "Filter tahun",
                 year_options,
+                key="clustering_year",
+                on_change=_clear_clustering_result,
                 help="Pilih satu tahun atau gabungkan seluruh data periode 2014–2025.",
             )
         with control_method:
             method = st.selectbox(
                 "Metode clustering",
                 ("K-Medoids", "OPTICS"),
+                key="clustering_method",
+                on_change=_clear_clustering_result,
                 help="K-Medoids membagi wilayah ke k kelompok; OPTICS menemukan "
                 "kelompok berbasis kepadatan dan dapat menandai noise.",
             )
@@ -813,6 +865,8 @@ with experiment_tab:
                 "Mode pencarian parameter",
                 ("Cari konfigurasi terbaik", "Gunakan parameter manual"),
                 index=0,
+                key="clustering_mode",
+                on_change=_clear_clustering_result,
                 help="Pilih otomatis untuk mencari konfigurasi terbaik; kriteria mengikuti metode yang dipilih, "
                 "atau manual jika ingin menentukan nilai parameter sendiri.",
             )
@@ -831,6 +885,8 @@ with experiment_tab:
                     min_value=2,
                     max_value=12,
                     value=3,
+                    key="clustering_cluster_count",
+                    on_change=_clear_clustering_result,
                     help="Jumlah kelompok yang akan dibentuk.",
                 )
             min_samples = 5
@@ -846,13 +902,18 @@ with experiment_tab:
             with parameter_columns[1]:
                 st.caption("Parameter terbaik akan dipilih otomatis untuk hasil clustering yang paling stabil.")
             with parameter_columns[2]:
-                st.caption("Mode ini cocok untuk skripsi karena hasil didasarkan pada evaluasi objektif, bukan asumsi manual.")
+                st.caption(
+                    "Pemilihan k didasarkan pada nilai silhouette tertinggi "
+                    "dari kandidat yang diuji."
+                )
     else:
         cluster_count = 3
         if cluster_mode == "Gunakan parameter manual":
             use_custom_xi = st.checkbox(
                 "Atur xi (opsional)",
                 value=False,
+                key="clustering_use_custom_xi",
+                on_change=_clear_clustering_result,
                 help="Jika tidak diatur, OPTICS memakai nilai xi bawaan scikit-learn (0,05).",
             )
             with parameter_columns[0]:
@@ -861,6 +922,8 @@ with experiment_tab:
                     min_value=2,
                     max_value=40,
                     value=5,
+                    key="clustering_min_samples",
+                    on_change=_clear_clustering_result,
                     help="Jumlah minimum sampel untuk membentuk wilayah padat.",
                 )
             with parameter_columns[1]:
@@ -871,6 +934,8 @@ with experiment_tab:
                         max_value=0.20,
                         value=0.05,
                         step=0.01,
+                        key="clustering_xi",
+                        on_change=_clear_clustering_result,
                         help="Ambang sensitivitas ekstraksi cluster OPTICS metode xi.",
                     )
                 else:
@@ -906,6 +971,7 @@ with experiment_tab:
     )
 
     if run_analysis:
+        _clear_clustering_result()
         try:
             with st.spinner(
                 f"Menyiapkan data dan menjalankan {method}. Proses ini bisa memerlukan waktu..."
@@ -973,6 +1039,7 @@ with experiment_tab:
                 "computation_seconds": computation_seconds,
                 "cluster_mode": cluster_mode,
                 "search_candidates": search_candidates,
+                "cluster_label_order": CLUSTER_LABEL_ORDER,
             }
 
     result = st.session_state.get("clustering_result")
@@ -988,6 +1055,7 @@ with experiment_tab:
         or metadata["year"] != selected_year
         or metadata.get("dataset_version") != dataset_version
         or metadata.get("cluster_mode") != cluster_mode
+        or metadata.get("cluster_label_order") != CLUSTER_LABEL_ORDER
         or (
             cluster_mode == "Gunakan parameter manual"
             and (
@@ -1002,6 +1070,19 @@ with experiment_tab:
         result = None
 
     if result is not None and metadata is not None:
+        result_fingerprint = hashlib.sha256(
+            pd.util.hash_pandas_object(
+                result[["_kode_peta", *FEATURE_LABELS, "Cluster"]],
+                index=False,
+            ).values.tobytes()
+        ).hexdigest()[:12]
+        analysis_chart_key = (
+            f"{metadata['dataset_version']}_{metadata['method']}_"
+            f"{metadata['year'] or 'all'}_{metadata['cluster_count']}_"
+            f"{metadata['min_samples']}_{metadata.get('xi')}_"
+            f"{metadata.get('cluster_label_order', 'default')}_"
+            f"{result_fingerprint}"
+        )
         cluster_parameters = (
             f"k={metadata['cluster_count']}"
             if metadata["method"] == "K-Medoids"
@@ -1171,7 +1252,8 @@ with experiment_tab:
         st.subheader("Ringkasan karakteristik cluster")
         st.caption(
             "Setiap indikator membandingkan rata-rata cluster dengan rata-rata "
-            "nilai cluster non-noise lainnya. Label cluster bukan tingkat kerawanan."
+            "nilai cluster non-noise lainnya. Cluster diurutkan dari rata-rata "
+            "dampak ternormalisasi terendah; label bukan tingkat kerawanan."
         )
         cluster_profile = _cluster_profile(result)
         if cluster_profile.empty:
@@ -1233,7 +1315,8 @@ with experiment_tab:
         st.subheader("Distribusi wilayah per cluster")
         st.caption(
             "Grafik menunjukkan jumlah dan proporsi kabupaten/kota pada "
-            "setiap cluster. Label cluster bukan tingkat kerawanan."
+            "setiap cluster. Cluster 0 memiliki rata-rata dampak ternormalisasi "
+            "terendah; label bukan tingkat kerawanan."
         )
         cluster_distribution = (
             result.groupby("Cluster", as_index=False)
@@ -1324,7 +1407,7 @@ with experiment_tab:
                     },
                 },
                 width="stretch",
-                key="cluster_distribution_bar",
+                key=f"cluster_distribution_bar_{analysis_chart_key}",
             )
         with distribution_right:
             st.markdown("**Proporsi kabupaten/kota**")
@@ -1395,7 +1478,7 @@ with experiment_tab:
                     ],
                 },
                 width="stretch",
-                key="cluster_distribution_pie",
+                key=f"cluster_distribution_pie_{analysis_chart_key}",
             )
 
         st.subheader("Persebaran dampak per cluster")
@@ -1475,7 +1558,10 @@ with experiment_tab:
                                 "config": {"view": {"stroke": None}},
                             },
                             width="stretch",
-                            key=f"cluster_indicator_boxplot_{feature_index}",
+                            key=(
+                                f"cluster_indicator_boxplot_{feature_index}_"
+                                f"{analysis_chart_key}"
+                            ),
                             alt=f"Distribusi {feature.casefold()} pada setiap cluster",
                         )
 
@@ -1494,7 +1580,7 @@ with experiment_tab:
             map_legend.append(
                 '<span style="display:inline-flex;align-items:center;margin:0 .8rem .35rem 0;'
                 'font-size:.84rem"><span style="display:inline-block;width:.7rem;height:.7rem;'
-                'border-radius:50%;background:#64748b;margin-right:.35rem"></span>Noise</span>'
+                'border-radius:50%;background:#6b7280;margin-right:.35rem"></span>Noise</span>'
             )
         st.markdown("".join(map_legend), unsafe_allow_html=True)
         st.caption(
@@ -1505,7 +1591,10 @@ with experiment_tab:
         try:
             if not GEOJSON_PATH.is_file():
                 raise FileNotFoundError(f"Berkas batas wilayah tidak ditemukan: {GEOJSON_PATH}")
-            mapped_region_count = render_cluster_map(result)
+            mapped_region_count = render_cluster_map(
+                result,
+                map_key=f"landslide_cluster_map_{analysis_chart_key}",
+            )
             if mapped_region_count < len(result):
                 st.info(
                     f"Batas peta tersedia untuk {mapped_region_count:,} dari {len(result):,} "
@@ -1529,9 +1618,20 @@ with experiment_tab:
             *FEATURE_LABELS,
             "Cluster",
         ]
-        table_result = result[table_columns].sort_values(
-            ["Cluster", "Kabupaten"],
-            kind="stable",
+        table_result = result[table_columns].copy()
+        table_result["_cluster_order"] = table_result["Cluster"].map(
+            lambda label: (
+                len(non_noise_clusters)
+                if label == "Noise"
+                else int(label.rsplit(" ", 1)[-1])
+            )
+        )
+        table_result = (
+            table_result.sort_values(
+                ["_cluster_order", "Kabupaten"],
+                kind="stable",
+            )
+            .drop(columns="_cluster_order")
         )
         st.dataframe(
             table_result,
@@ -1562,19 +1662,22 @@ with experiment_tab:
         )
 
 with data_tab:
-    st.subheader("Top kabupaten/kota terdampak per tahun")
+    st.subheader("Peringkat wilayah dan tren tahunan")
     st.caption(
-        "Peringkat dihitung dari akumulasi dampak kejadian longsor di setiap "
-        "kabupaten/kota. Pilih jenis dampak untuk melihat tren tahunan dan wilayah "
-        "dengan dampak tertinggi."
+        "Bandingkan akumulasi dampak atau frekuensi kejadian longsor per wilayah, "
+        "berdasarkan satu tahun maupun gabungan seluruh tahun."
     )
-    information_feature = st.selectbox(
-        "Jenis dampak",
-        FEATURE_LABELS,
+    information_feature_labels = {
+        "Frekuensi kejadian longsor": "Jumlah Kejadian",
+        **{feature: feature for feature in FEATURE_LABELS},
+    }
+    selected_feature_label = st.selectbox(
+        "Indikator",
+        list(information_feature_labels),
         key="annual_top_feature",
     )
+    information_feature = information_feature_labels[selected_feature_label]
 
-    annual_top_tables = []
     annual_totals = []
     annual_region_by_year = {}
     for year in available_years:
@@ -1588,55 +1691,96 @@ with data_tab:
         annual_totals.append(
             {
                 "Tahun": year,
-                "Total dampak": annual_regions[information_feature].sum(),
+                "Total": annual_regions[information_feature].sum(),
             }
         )
-        annual_top = annual_regions.nlargest(5, information_feature)[
-            ["Kode Kabupaten", "Kabupaten", information_feature]
-        ].copy()
-        annual_top.insert(0, "Tahun", year)
-        annual_top.insert(1, "Peringkat", range(1, len(annual_top) + 1))
-        annual_top_tables.append(
-            annual_top.rename(columns={information_feature: "Total dampak"})
-        )
 
-    if annual_top_tables:
+    information_year_options: list[str | int] = [
+        "Gabungan semua tahun (2014–2025)",
+        *annual_region_by_year,
+    ]
+    if annual_region_by_year:
         information_year = st.selectbox(
-            "Tahun untuk peringkat wilayah",
-            list(annual_region_by_year),
-            index=len(annual_region_by_year) - 1,
+            "Periode peringkat wilayah",
+            information_year_options,
+            index=len(information_year_options) - 1,
             key="annual_top_year",
         )
+        if information_year == "Gabungan semua tahun (2014–2025)":
+            selected_region_data, _, _ = prepare_regional_data(source_data, None)
+            period_label = "gabungan semua tahun (2014–2025)"
+        else:
+            selected_region_data = annual_region_by_year[int(information_year)]
+            period_label = str(information_year)
+
         trend_column, top_region_column = st.columns(2)
         with trend_column:
             st.markdown(f"**Tren tahunan: {information_feature.casefold()}**")
             st.line_chart(
                 pd.DataFrame(annual_totals),
                 x="Tahun",
-                y="Total dampak",
+                y="Total",
                 x_label="Tahun",
-                y_label="Total dampak",
+                y_label=selected_feature_label,
                 height=350,
                 alt=f"Tren tahunan {information_feature.casefold()} untuk semua kabupaten/kota",
             )
 
         with top_region_column:
-            selected_year_data = annual_region_by_year[information_year]
-            top_regions = selected_year_data.nlargest(10, information_feature)
-            st.markdown(
-                f"**10 wilayah teratas, {information_year}: "
-                f"{information_feature.casefold()}**"
+            top_regions = (
+                selected_region_data.nlargest(10, information_feature)
+                .sort_values(information_feature, ascending=False, kind="stable")
             )
-            st.bar_chart(
-                top_regions.set_index("Kabupaten")[information_feature],
-                horizontal=True,
-                x_label=information_feature,
-                y_label="Kabupaten/kota",
-                height=350,
+            st.markdown(
+                f"**10 wilayah teratas, {period_label}: "
+                f"{selected_feature_label.casefold()}**"
+            )
+            import altair as alt
+
+            top_regions_chart = (
+                alt.Chart(top_regions)
+                .mark_bar()
+                .encode(
+                    x=alt.X(
+                        f"{information_feature}:Q",
+                        title=selected_feature_label,
+                    ),
+                    y=alt.Y(
+                        "Kabupaten:N",
+                        sort=alt.SortField(
+                            field=information_feature,
+                            order="descending",
+                        ),
+                        title="Kabupaten/kota",
+                    ),
+                    tooltip=[
+                        alt.Tooltip("Kabupaten:N", title="Kabupaten/kota"),
+                        alt.Tooltip(
+                            f"{information_feature}:Q",
+                            title=selected_feature_label,
+                            format=",.0f",
+                        ),
+                    ],
+                )
+                .properties(
+                    height=350,
+                    description=(
+                        f"Sepuluh kabupaten/kota dengan {selected_feature_label.casefold()} "
+                        f"tertinggi pada {period_label}, diurutkan dari terbesar ke terkecil"
+                    ),
+                )
+            )
+            st.altair_chart(
+                top_regions_chart,
+                width="stretch",
+                key=(
+                    f"annual_top_regions_{information_feature}_"
+                    f"{information_year}"
+                ),
                 alt=(
-                    f"Sepuluh kabupaten/kota dengan {information_feature.casefold()} "
-                    f"tertinggi pada {information_year}"
+                    f"Sepuluh kabupaten/kota dengan {selected_feature_label.casefold()} "
+                    f"tertinggi pada {period_label}, dari terbesar ke terkecil"
                 ),
             )
     else:
-        st.info("Belum ada data valid untuk membuat peringkat tahunan.")
+        st.info("Belum ada data valid untuk membuat peringkat wilayah.")
