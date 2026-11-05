@@ -14,7 +14,6 @@ from components.auth import is_logged_in, require_login
 from components.dataset_store import load_active_dataset
 from components.sidebar import show_sidebar
 
-
 st.set_page_config(
     page_title="Clustering Dampak Longsor",
     page_icon="🧭",
@@ -59,14 +58,6 @@ st.markdown(
                 linear-gradient(135deg, rgba(15, 23, 42, .96), rgba(17, 54, 54, .88));
             margin: .4rem 0 1.25rem;
         }
-        .cluster-eyebrow {
-            color: #5eead4;
-            font-size: .76rem;
-            font-weight: 750;
-            letter-spacing: .14em;
-            text-transform: uppercase;
-            margin-bottom: .45rem;
-        }
         .cluster-hero h1 {
             color: #3B82F6;
             font-size: clamp(1.8rem, 3vw, 2.55rem);
@@ -105,11 +96,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-
 def _normalized_column_name(value: object) -> str:
     """Normalisasi nama kolom agar variasi huruf dan tanda baca bisa dicocokkan."""
     return re.sub(r"[^a-z0-9]+", " ", str(value).casefold()).strip()
-
 
 def _find_column(columns: pd.Index, aliases: tuple[str, ...]) -> str | None:
     """Cari nama kolom yang cocok dengan salah satu alias secara tidak peka format.
@@ -127,7 +116,6 @@ def _find_column(columns: pd.Index, aliases: tuple[str, ...]) -> str | None:
         if match is not None:
             return match
     return None
-
 
 def _region_code_key(value: object) -> str | None:
     """Ubah kode wilayah menjadi kunci digit empat karakter untuk pencocokan peta.
@@ -155,13 +143,11 @@ def _region_code_key(value: object) -> str | None:
     digits = re.sub(r"\D", "", text)
     return digits.zfill(4) if digits else None
 
-
 def _display_region_code(code_key: str) -> str:
     """Format kunci kode wilayah empat digit dengan titik pemisah."""
     if len(code_key) == 4:
         return f"{code_key[:2]}.{code_key[2:]}"
     return code_key
-
 
 def _cluster_color(label: str) -> str:
     """Pilih warna peta untuk label cluster atau label noise."""
@@ -170,12 +156,10 @@ def _cluster_color(label: str) -> str:
     cluster_number = int(label.rsplit(" ", 1)[-1])
     return CLUSTER_PALETTE[cluster_number % len(CLUSTER_PALETTE)]
 
-
 def _clear_clustering_result() -> None:
     """Hapus hasil lama saat filter atau parameter clustering berubah."""
     st.session_state.pop("clustering_result", None)
     st.session_state.pop("clustering_metadata", None)
-
 
 def _resolve_impact_columns(columns: pd.Index) -> dict[str, list[str]]:
     """Temukan kolom dampak yang diperlukan dan kelompokkan menurut jenis fitur.
@@ -254,7 +238,6 @@ def _resolve_impact_columns(columns: pd.Index) -> dict[str, list[str]]:
             column for column in public_facilities if column is not None
         ],
     }
-
 
 def prepare_regional_data(
     dataset: pd.DataFrame,
@@ -789,7 +772,6 @@ show_sidebar(active_page="Clustering")
 st.markdown(
     """
     <section class="cluster-hero">
-        <div class="cluster-eyebrow">Analisis dampak · Indonesia · 2014–2025</div>
         <h1>Clustering Wilayah Tanah Longsor</h1>
         <p>
             Kelompokkan kabupaten/kota berdasarkan akumulasi dampak kejadian
