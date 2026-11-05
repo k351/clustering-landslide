@@ -674,7 +674,10 @@ def _pick_best_optics(regions: pd.DataFrame, max_min_samples: int = 40) -> dict[
     candidate_rows: list[dict[str, object]] = []
     max_min = min(max_min_samples, max(2, len(regions) - 1))
     xi_values = [round(value, 2) for value in np.arange(0.01, 0.20, 0.02)]
-    for min_samples in range(2, max_min + 1):
+    min_samples_values = range(5, max_min + 1, 5)
+    if max_min < 5:
+        min_samples_values = (max_min,)
+    for min_samples in min_samples_values:
         for xi in xi_values:
             candidate_result, candidate_scores, candidate_notes = cluster_regions(
                 regions,
@@ -929,7 +932,7 @@ with experiment_tab:
             min_samples = 5
             xi = None
             with parameter_columns[0]:
-                st.caption("Grid otomatis: min_samples 2–40 (atau sampai jumlah wilayah−1), xi 0,01–0,19 dengan interval 0,02.")
+                st.caption("Grid otomatis: min_samples 5–40 dengan interval 5 (disesuaikan dengan jumlah wilayah), xi 0,01–0,19 dengan interval 0,02.")
             with parameter_columns[1]:
                 st.caption("Syarat: minimal 2 cluster dan Silhouette Score tersedia. Terbanyak wilayah non-noise menang; silhouette memecahkan seri.")
             with parameter_columns[2]:
@@ -1573,16 +1576,10 @@ with experiment_tab:
         try:
             if not GEOJSON_PATH.is_file():
                 raise FileNotFoundError(f"Berkas batas wilayah tidak ditemukan: {GEOJSON_PATH}")
-            mapped_region_count = render_cluster_map(
+            render_cluster_map(
                 result,
                 map_key=f"landslide_cluster_map_{analysis_chart_key}",
             )
-            if mapped_region_count < len(result):
-                st.info(
-                    f"Batas peta tersedia untuk {mapped_region_count:,} dari {len(result):,} "
-                    "wilayah pada hasil. Wilayah lain tetap tercantum pada tabel, tetapi "
-                    "batas geografisnya tidak tersedia pada GeoJSON aplikasi."
-                )
         except ImportError as exc:
             st.error(
                 "Pustaka peta belum tersedia. Pasang dependensi aplikasi dari "

@@ -118,17 +118,6 @@ st.markdown("""
         opacity: 0.7;
     }
 
-    .info-card {
-        box-sizing: border-box;
-        width: 100%;
-        padding: 22px;
-        margin-bottom: 14px;
-        border-radius: 15px;
-        background: rgba(128, 128, 128, 0.06);
-        border: 1px solid rgba(128, 128, 128, 0.2);
-    }
-
-    .info-label,
     .profile-label {
         font-size: 11px;
         font-weight: 750;
@@ -138,7 +127,6 @@ st.markdown("""
         margin-bottom: 9px;
     }
 
-    .info-value,
     .profile-value {
         font-size: 15px;
         font-weight: 600;
@@ -163,33 +151,6 @@ st.markdown("""
     .profile-item {
         flex: 1 1 180px;
         min-width: 0;
-    }
-
-    .tech-list {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 8px;
-    }
-
-    .tech-item {
-        display: inline-block;
-        padding: 7px 11px;
-        border-radius: 9px;
-        background: rgba(59, 130, 246, 0.09);
-        border: 1px solid rgba(59, 130, 246, 0.22);
-        font-size: 12px;
-        font-weight: 650;
-        line-height: 1.4;
-    }
-
-    .footer {
-        text-align: center;
-        opacity: 0.6;
-        font-size: 13px;
-        line-height: 1.8;
-        margin-top: 38px;
-        padding: 22px 10px 10px;
-        border-top: 1px solid rgba(128, 128, 128, 0.2);
     }
 
     @media (max-width: 768px) {
@@ -320,48 +281,3 @@ with col2:
         </div>
     </div>
     """, unsafe_allow_html=True)
-
-st.divider()
-
-st.markdown(
-    '<div class="section-title">⚙️ Informasi Teknis</div>',
-    unsafe_allow_html=True
-)
-
-st.markdown("""
-<div class="info-card">
-    <div class="info-label">Algoritma Clustering</div>
-    <div class="tech-list">
-        <span class="tech-item">K-Medoids</span>
-        <span class="tech-item">OPTICS</span>
-    </div>
-</div>
-
-<div class="info-card">
-    <div class="info-label">Sumber Data</div>
-    <div class="info-value">
-        Data kejadian dan dampak bencana tanah longsor dari BNPB.
-    </div>
-</div>
-
-<div class="info-card">
-    <div class="info-label">Teknologi yang Digunakan</div>
-    <div class="tech-list">
-        <span class="tech-item">Python</span>
-        <span class="tech-item">Streamlit</span>
-        <span class="tech-item">PostgreSQL</span>
-        <span class="tech-item">Scikit-learn</span>
-        <span class="tech-item">Pandas</span>
-        <span class="tech-item">GeoPandas</span>
-        <span class="tech-item">Folium</span>
-    </div>
-</div>
-""", unsafe_allow_html=True)
-
-st.markdown("""
-<div class="footer">
-    © 2026 Alvin Kurniawan
-    <br>
-    Teknik Informatika · Universitas Tarumanagara
-</div>
-""", unsafe_allow_html=True)
