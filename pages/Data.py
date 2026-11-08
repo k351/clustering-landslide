@@ -20,9 +20,6 @@ st.set_page_config(
     layout="wide",
 )
 
-DATASET_PERIOD = "2014–2025"
-
-
 def read_uploaded_dataset(file_name: str, content: bytes) -> pd.DataFrame:
     extension = Path(file_name).suffix.lower()
     if extension == ".csv":
@@ -247,14 +244,47 @@ region_count = (
 )
 region_value = f"{region_count:,}" if region_count is not None else "Tidak tersedia"
 
+year_column = next(
+    (
+        column
+        for column in active_dataset.columns
+        if re.sub(r"[^a-z0-9]+", " ", str(column).casefold()).strip() == "tahun"
+    ),
+    None,
+)
+available_years = (
+    sorted(
+        {
+            int(year)
+            for year in pd.to_numeric(
+                active_dataset[year_column],
+                errors="coerce",
+            ).dropna()
+            if float(year).is_integer()
+        }
+    )
+    if year_column is not None
+    else []
+)
+if available_years:
+    dataset_period = (
+        str(available_years[0])
+        if available_years[0] == available_years[-1]
+        else f"{available_years[0]}–{available_years[-1]}"
+    )
+    period_help = "Periode dihitung dari tahun yang tersedia pada dataset aktif."
+else:
+    dataset_period = "Tidak tersedia"
+    period_help = "Kolom Tahun tidak ditemukan atau tidak berisi tahun yang valid."
+
 metric_columns = st.columns(4)
 metric_columns[0].metric("Jumlah baris", f"{len(active_dataset):,}")
 metric_columns[1].metric("Jumlah kolom", f"{len(active_dataset.columns):,}")
 metric_columns[2].metric("Kabupaten/kota", region_value)
 metric_columns[3].metric(
     "Periode data",
-    DATASET_PERIOD,
-    help="Rentang periode: 1 Januari 2014 sampai 31 Desember 2025.",
+    dataset_period,
+    help=period_help,
 )
 
 dataset_source = (
@@ -317,17 +347,54 @@ else:
     st.download_button(
         "Unduh Template Excel",
         data=template_content,
-        file_name="template_dataset_longsor.xlsx",
+        file_name="template_dataset_tanah_longsor.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         type="secondary",
         width="stretch",
         help="Template berisi nama kolom dataset aktif tanpa baris data.",
     )
 
+with st.expander("Syarat dataset untuk clustering"):
+    st.markdown(
+        "- Data dapat diperoleh dari **DIBI BNPB**.\n"
+        "- Dataset harus memiliki kolom **Kode Kabupaten**, **Kabupaten**, "
+        "dan **Tahun**.\n"
+        "- Kolom dampak yang diperlukan: **Meninggal**; **Menderita** dan "
+        "**Mengungsi** (atau kolom gabungannya); **Luka / Sakit**; **Hilang**; "
+        "kerusakan rumah berat, sedang, dan ringan; serta kolom kerusakan "
+        "fasilitas umum yang digunakan aplikasi.\n"
+        "- Baris yang dipakai harus memiliki tahun dan identitas wilayah yang "
+        "valid, serta nilai numerik dampak yang lengkap dan terbatas "
+        "(bukan missing value atau tak hingga). Baris tidak valid dikeluarkan "
+        "dari analisis.\n"
+        "- Data valid diagregasikan per kabupaten/kota menjadi empat indikator "
+        "dampak, lalu dinormalisasi. Wilayah dikelompokkan berdasarkan "
+        "kemiripan nilai indikator tersebut."
+    )
+    st.markdown(
+        "**K-Medoids:** jumlah wilayah valid harus lebih besar daripada "
+        "jumlah cluster (k). Karena k minimal 2, setidaknya diperlukan "
+        "3 kabupaten/kota valid."
+    )
+    st.markdown(
+        "**OPTICS:** jumlah wilayah harus mencukupi parameter `min_samples`. "
+        "Tidak semua wilayah pasti masuk cluster; wilayah yang tidak memenuhi "
+        "kepadatan dapat diberi label Noise. Pencarian otomatis hanya memilih "
+        "konfigurasi dengan minimal dua cluster non-noise dan Silhouette Score "
+        "yang dapat dihitung."
+    )
+    st.caption(
+        "Data valid tidak menjamin cluster tertentu pasti terbentuk. Hasilnya "
+        "bergantung pada pola nilai dampak dan parameter yang digunakan."
+    )
+
 uploaded_file = st.file_uploader(
     "Pilih berkas dataset",
     type=["csv", "xlsx"],
-    help="Kolom dataset harus mencakup seluruh kolom wajib pada dataset penelitian.",
+    help=(
+        "Kolom dataset harus mencakup seluruh kolom wajib pada dataset "
+        "penelitian. Syarat lengkap ada di bagian atas."
+    ),
 )
 
 if uploaded_file is not None:

@@ -1,8 +1,12 @@
+from pathlib import Path
+
 import streamlit as st
 
 from components.auth import require_login
 from components.sidebar import show_sidebar
 
+APP_DIR = Path(__file__).resolve().parents[1]
+MANUAL_PATH = APP_DIR / "data" / "Manual_Book.pdf"
 
 st.set_page_config(
     page_title="FAQ",
@@ -155,9 +159,14 @@ st.markdown(
     """
     <style>
         .faq-intro {
-            border-left: 4px solid #3B82F6;
-            padding: 4px 0 4px 18px;
-            margin: 10px 0 24px;
+            border-left: none;
+            border: 1px solid rgba(148, 163, 184, 0.22);
+            border-radius: 16px;
+            background: rgba(15, 23, 42, 0.45);
+            padding: 24px 26px;
+            margin: 10px auto 24px;
+            max-width: 1100px;
+            text-align: center;
         }
 
         .faq-kicker {
@@ -173,6 +182,18 @@ st.markdown(
             max-width: 760px;
             line-height: 1.7;
             opacity: 0.75;
+            margin: 0 auto;
+            text-align: center;
+        }
+
+        div[data-testid="stVerticalBlockBorderWrapper"],
+        div[data-testid="stHorizontalBlock"],
+        div[data-testid="stExpander"],
+        div[data-testid="stSegmentedControl"],
+        div[data-testid="stTextInput"] {
+            max-width: 1100px;
+            margin-left: auto;
+            margin-right: auto;
         }
 
         [data-testid="stExpander"] {
@@ -196,6 +217,27 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+with st.container(border=True):
+    manual_description, manual_action = st.columns(
+        [3, 1],
+        vertical_alignment="center",
+    )
+    with manual_description:
+        st.subheader("Manual program")
+    with manual_action:
+        if MANUAL_PATH.is_file():
+            st.download_button(
+                "Unduh manual",
+                data=MANUAL_PATH.read_bytes(),
+                file_name="Manual_Book.pdf",
+                mime="application/pdf",
+                type="primary",
+                width="stretch",
+                icon=":material/download:",
+            )
+        else:
+            st.error("File manual program tidak ditemukan.")
 
 categories = ["Semua topik", "Tentang penelitian", "Metode analisis", "Penggunaan aplikasi"]
 selected_category = st.segmented_control(

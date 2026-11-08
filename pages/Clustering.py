@@ -15,7 +15,7 @@ from components.dataset_store import load_active_dataset
 from components.sidebar import show_sidebar
 
 st.set_page_config(
-    page_title="Clustering Dampak Longsor",
+    page_title="Clustering Dampak Tanah Longsor",
     page_icon="🧭",
     layout="wide",
 )
@@ -479,7 +479,7 @@ def render_cluster_map(
     result_records = result.to_dict(orient="records")
     code_counts = result["_kode_peta"].value_counts()
     result_by_code = {
-        region["_kode_peta"]: region
+        region["_kode_peta"]: region    
         for region in result_records
         if code_counts[region["_kode_peta"]] == 1
     }
@@ -807,34 +807,47 @@ if year_column is None:
     st.error("Kolom Tahun tidak ditemukan pada dataset.")
     st.stop()
 available_years = sorted(
-    int(year)
-    for year in pd.to_numeric(source_data[year_column], errors="coerce")
-    .dropna()
-    .unique()
-    if 2014 <= year <= 2025
+    {
+        int(year)
+        for year in pd.to_numeric(
+            source_data[year_column],
+            errors="coerce",
+        ).dropna()
+        if float(year).is_integer()
+    }
 )
 if not available_years:
-    st.error("Dataset tidak memiliki data pada periode 2014–2025.")
+    st.error("Dataset tidak memiliki nilai tahun yang valid.")
     st.stop()
 
-experiment_tab, data_tab = st.tabs(["Eksperimen", "Informasi Data"])
+year_range_label = (
+    str(available_years[0])
+    if available_years[0] == available_years[-1]
+    else f"{available_years[0]}–{available_years[-1]}"
+)
+all_years_option = f"Semua tahun ({year_range_label})"
+
+experiment_tab, data_tab = st.tabs(["Pengelompokkan", "Informasi Data"])
 
 with experiment_tab:
     top_metrics = st.columns(2)
-    top_metrics[0].metric("Periode analisis", "2014–2025")
+    top_metrics[0].metric("Periode analisis", year_range_label)
     top_metrics[1].metric("Kejadian pada dataset", f"{len(source_data):,}")
 
     st.markdown('<div class="section-kicker">Atur analisis</div>', unsafe_allow_html=True)
     with st.container(border=True):
         control_year, control_method, control_mode = st.columns([1, 1.2, 1.5])
         with control_year:
-            year_options: list[str | int] = ["Semua tahun (2014–2025)", *available_years]
+            year_options: list[str | int] = [all_years_option, *available_years]
             selected_year_option = st.selectbox(
                 "Filter tahun",
                 year_options,
                 key="clustering_year",
                 on_change=_clear_clustering_result,
-                help="Pilih satu tahun atau gabungkan seluruh data periode 2014–2025.",
+                help=(
+                    "Pilih satu tahun atau gabungkan data dari seluruh tahun "
+                    f"yang tersedia ({year_range_label})."
+                ),
             )
         with control_method:
             method = st.selectbox(
@@ -858,7 +871,7 @@ with experiment_tab:
 
     selected_year = (
         None
-        if selected_year_option == "Semua tahun (2014–2025)"
+        if selected_year_option == all_years_option
         else int(selected_year_option)
     )
     parameter_columns = st.columns([1, 1, 1.2])
@@ -868,7 +881,7 @@ with experiment_tab:
                 cluster_count = st.slider(
                     "Jumlah cluster (k)",
                     min_value=2,
-                    max_value=12,
+                    max_value=7,
                     value=3,
                     key="clustering_cluster_count",
                     on_change=_clear_clustering_result,
@@ -1091,7 +1104,7 @@ with experiment_tab:
 
         st.caption(
             f"Metode **{metadata['method']}** · "
-            f"{'Semua tahun 2014–2025' if metadata['year'] is None else 'Tahun ' + str(metadata['year'])} · "
+            f"{all_years_option if metadata['year'] is None else 'Tahun ' + str(metadata['year'])} · "
             f"{cluster_parameters} · "
             f"{metadata['valid_event_rows']:,} baris kejadian valid · "
             f"{metadata['dropped_rows']:,} baris dihapus karena missing atau nilai tidak valid pada fitur yang digunakan."
@@ -1635,7 +1648,7 @@ with experiment_tab:
         st.download_button(
             "Unduh hasil sebagai CSV",
             data=result[download_columns].to_csv(index=False).encode("utf-8-sig"),
-            file_name="hasil_clustering_longsor.csv",
+            file_name="hasil_clustering_tanah_longsor.csv",
             mime="text/csv",
             icon=":material/download:",
         )
@@ -1643,11 +1656,11 @@ with experiment_tab:
 with data_tab:
     st.subheader("Peringkat wilayah dan tren tahunan")
     st.caption(
-        "Bandingkan akumulasi dampak atau frekuensi kejadian longsor per wilayah, "
+        "Bandingkan akumulasi dampak atau frekuensi kejadian tanah longsor per wilayah, "
         "berdasarkan satu tahun maupun gabungan seluruh tahun."
     )
     information_feature_labels = {
-        "Frekuensi kejadian longsor": "Jumlah Kejadian",
+        "Frekuensi kejadian tanah longsor": "Jumlah Kejadian",
         **{feature: feature for feature in FEATURE_LABELS},
     }
     selected_feature_label = st.selectbox(
@@ -1675,7 +1688,7 @@ with data_tab:
         )
 
     information_year_options: list[str | int] = [
-        "Gabungan semua tahun (2014–2025)",
+        all_years_option,
         *annual_region_by_year,
     ]
     if annual_region_by_year:
@@ -1685,16 +1698,17 @@ with data_tab:
             index=len(information_year_options) - 1,
             key="annual_top_year",
         )
-        if information_year == "Gabungan semua tahun (2014–2025)":
+        if information_year == all_years_option:
             selected_region_data, _, _ = prepare_regional_data(source_data, None)
-            period_label = "gabungan semua tahun (2014–2025)"
+            period_label = f"gabungan seluruh tahun ({year_range_label})"
         else:
             selected_region_data = annual_region_by_year[int(information_year)]
             period_label = str(information_year)
 
         trend_column, top_region_column = st.columns(2)
         with trend_column:
-            st.markdown(f"**Tren tahunan: {information_feature.casefold()}**")
+            trend_label = f"{information_feature.casefold()} tanah longsor"
+            st.markdown(f"**Tren tahunan: {trend_label}**")
             st.line_chart(
                 pd.DataFrame(annual_totals),
                 x="Tahun",

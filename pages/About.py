@@ -1,8 +1,12 @@
 
+from pathlib import Path
+
 import streamlit as st
 
 from components.auth import require_login
 from components.sidebar import show_sidebar
+
+APP_DIR = Path(__file__).resolve().parents[1]
 
 st.set_page_config(
     page_title="Tentang",
@@ -16,8 +20,8 @@ show_sidebar()
 st.markdown("""
 <style>
     .about-hero {
-        text-align: center;
-        padding: 42px 24px;
+        text-align: left;
+        padding: 38px 42px;
         margin-bottom: 28px;
         border-radius: 20px;
         background: linear-gradient(
@@ -51,7 +55,7 @@ st.markdown("""
 
     .about-subtitle {
         max-width: 780px;
-        margin: 0 auto;
+        margin: 0;
         font-size: 16px;
         line-height: 1.8;
         opacity: 0.8;
@@ -155,7 +159,7 @@ st.markdown("""
 
     @media (max-width: 768px) {
         .about-hero {
-            padding: 30px 18px;
+            padding: 30px 24px;
         }
 
         .about-title {
@@ -182,17 +186,27 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("""
-<div class="about-hero">
-    <div class="about-eyebrow">Informasi Perancangan</div>
-    <div class="about-title">Tentang Website Ini</div>
-    <div class="about-subtitle">
-        Platform analisis dan pengelompokan wilayah berdasarkan
-        karakteristik dampak tanah longsor di Indonesia menggunakan
-        algoritma K-Medoids dan OPTICS.
+logo_column, hero_column = st.columns([1, 4], vertical_alignment="center", gap="large")
+with logo_column:
+    with st.container(border=True):
+        st.image(
+            APP_DIR / "images" / "untar-white.png",
+            alt="Logo Universitas Tarumanagara",
+            width=150,
+        )
+
+with hero_column:
+    st.markdown("""
+    <div class="about-hero">
+        <div class="about-eyebrow">Informasi Perancangan</div>
+        <div class="about-title">Tentang Website Ini</div>
+        <div class="about-subtitle">
+            Platform analisis dan pengelompokan wilayah berdasarkan
+            karakteristik dampak tanah longsor di Indonesia menggunakan
+            algoritma K-Medoids dan OPTICS.
+        </div>
     </div>
-</div>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
 
 st.markdown(
     '<div class="section-title">🎯 Latar Belakang Perancangan</div>',

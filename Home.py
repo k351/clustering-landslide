@@ -179,8 +179,8 @@ if not is_logged_in():
             st.markdown("<br>", unsafe_allow_html=True)
 
             st.info(
-                "Sebagai Guest, Anda dapat melihat data dan hasil "
-                "clustering, tetapi tidak dapat mengunggah atau mengubah data."
+                "Jelajahi data tanah longsor dan jalankan analisis clustering "
+                "untuk melihat hasil serta pola dampak antarwilayah."
             )
 
             st.markdown("<br>", unsafe_allow_html=True)
@@ -204,8 +204,8 @@ user_type = st.session_state.user_type
 st.markdown(f"Selamat datang, **{username}!**")
 if user_type == "guest":
     st.info(
-        "Anda masuk sebagai Guest. Anda dapat melihat data dan hasil "
-        "analisis, tetapi tidak dapat mengunggah atau mengubah data."
+        "Anda dapat menjelajahi data, menjalankan analisis clustering, "
+        "dan melihat visualisasi dampak tanah longsor antarwilayah."
     )
 else:
     st.success(
@@ -242,9 +242,7 @@ st.markdown("""
   #### 📊 Fitur Utama
 """)
 
-col_feature_admin, col_feature_guest = st.columns(2, gap="large")
-
-with col_feature_admin:
+if user_type == "admin":
     with st.container(border=True):
         st.markdown("### Administrator")
         st.markdown(
@@ -258,20 +256,15 @@ with col_feature_admin:
             "Preprocessing, agregasi per kabupaten/kota, dan normalisasi "
             "Min-Max dilakukan dalam alur analisis."
         )
-
-with col_feature_guest:
+else:
     with st.container(border=True):
         st.markdown("### Guest")
         st.markdown(
-            "- Memilih periode, metode clustering, dan parameter yang tersedia.\n"
-            "- Menjalankan analisis K-Medoids atau OPTICS.\n"
+            "- Memilih periode dan parameter analisis yang tersedia.\n"
+            "- Menjalankan analisis pengelompokan wilayah.\n"
             "- Membandingkan ringkasan cluster, proporsi wilayah, grafik sebaran, dan peta.\n"
             "- Melihat tren tahunan serta daftar wilayah terdampak tertinggi.\n"
             "- Mengunduh hasil clustering sebagai CSV."
-        )
-        st.caption(
-            "Guest dapat menjalankan analisis, tetapi tidak dapat mengunggah "
-            "atau mengganti dataset."
         )
 
 st.markdown("""
@@ -280,7 +273,10 @@ st.markdown("""
     - Mengidentifikasi persamaan dan perbedaan karakteristik dampak tanah longsor antarwilayah.
     - Menganalisis karakteristik setiap cluster berdasarkan variabel dampak yang digunakan.
     - Menyediakan visualisasi hasil clustering dalam bentuk tabel, grafik, dan peta yang mudah dipahami.
+""")
 
+if user_type == "admin":
+    st.markdown("""
     #### 🔧 Teknologi yang Digunakan
     - **K-Medoids**: Algoritma clustering berbasis partisi untuk mengelompokkan wilayah berdasarkan kemiripan karakteristik dampak tanah longsor.
     - **OPTICS**: Algoritma clustering berbasis kepadatan untuk mengidentifikasi struktur cluster berdasarkan kepadatan data.
@@ -289,7 +285,7 @@ st.markdown("""
     - **Pandas dan NumPy**: Pengolahan dan manipulasi data penelitian.
     - **Neon (PostgreSQL)**: Basis data untuk penyimpanan informasi aplikasi.
     - **Streamlit**: Framework untuk membangun antarmuka aplikasi web.
-""")
+    """)
 
 st.markdown("""
     <div class="home-footer">
